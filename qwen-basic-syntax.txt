@@ -1,0 +1,111 @@
+================================================================================
+MS-BASIC LANGUAGE SPECIFICATION: GRAMMAR, SEMANTICS, AND EXAMPLES
+================================================================================
+
+I. EBNF GRAMMAR
+--------------------------------------------------------------------------------
+(* Structure *)
+program         = { line } ;
+line            = line_number statement { ":" statement } newline ;
+line_number     = digit { digit } ;
+
+(* Statements *)
+statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt | 
+                  for_stmt | next_stmt | remark | end_stmt ;
+
+let_stmt        = [ "LET" ] variable "=" expression ;
+print_stmt      = "PRINT" [ expression_list ] ;
+if_stmt         = "IF" expression "THEN" ( line_number | statement ) ;
+goto_stmt       = "GOTO" line_number ;
+input_stmt      = "INPUT" [ string_literal ";" ] variable ;
+for_stmt        = "FOR" variable "=" expression "TO" expression [ "STEP" expression ] ;
+next_stmt       = "NEXT" [ variable ] ;
+remark          = ( "REM" | "'" ) { character } ;
+end_stmt        = "END" ;
+
+(* Expressions *)
+expression      = term { ( "+" | "-" ) term } ;
+term            = factor { ( "*" | "/" ) factor } ;
+factor          = variable | number | string_literal | "(" expression ")" | function ;
+variable        = letter [ letter | digit ] [ "$" | "%" | "!" | "#" ] ;
+number          = [ "-" ] digit { digit } [ "." { digit } ] ;
+string_literal  = '"' { character } '"' ;
+
+
+II. SEMANTIC EXPLANATIONS
+--------------------------------------------------------------------------------
+1. LET (Assignment)
+   Action: Evaluates the expression on the right and stores the result in the 
+   memory location associated with the variable.
+   Note: String variables ($) must receive string values.
+
+2. PRINT (Output)
+   Action: Sends data to the screen. 
+   - A semicolon (;) suppresses the newline, keeping the cursor in place.
+   - A comma (,) moves the cursor to the next 14-character tab zone.
+
+3. INPUT (Data Entry)
+   Action: Pauses the program and displays a "?" prompt. It waits for the user 
+   to type a value and press ENTER before assigning that value to the variable.
+
+4. GOTO (Branching)
+   Action: Changes the Program Counter to the specified line number. This is 
+   the primary method for creating loops or jumping over sections of code.
+
+5. IF...THEN (Conditional)
+   Action: Evaluates a logic expression. If True (non-zero), it executes the 
+   clause after THEN. If False (zero), it skips to the next line number.
+
+6. FOR / NEXT (Iteration)
+   Action: Automates a loop. FOR sets a start and end limit. NEXT increments 
+   the counter and sends the program back to the FOR line until the limit is 
+   reached.
+
+7. REM (Remark)
+   Action: Ignored by the computer. Used for human-readable notes.
+
+8. END (Termination)
+   Action: Effectively stops the program and returns the user to the 
+   interpreter's command prompt.
+
+
+III. CODE EXAMPLES AND OUTPUT
+--------------------------------------------------------------------------------
+
+EXAMPLE 1: USER INTERACTION
+Code:
+10 PRINT "WHAT IS YOUR NAME?"
+20 INPUT N$
+30 PRINT "HELLO "; N$; "!"
+40 END
+
+Output:
+WHAT IS YOUR NAME?
+? ALICE
+HELLO ALICE!
+
+EXAMPLE 2: CONDITIONAL MATH
+Code:
+10 LET X = 5
+20 INPUT "GUESS (1-10): "; G
+30 IF G = X THEN PRINT "CORRECT!"
+40 IF G <> X THEN PRINT "WRONG, IT WAS"; X
+50 END
+
+Output:
+GUESS (1-10): 5
+CORRECT!
+
+EXAMPLE 3: THE FOR-NEXT LOOP
+Code:
+10 PRINT "POWERS OF 2:"
+20 FOR I = 1 TO 5
+30 PRINT 2 ^ I;
+40 NEXT I
+50 END
+
+Output:
+POWERS OF 2:
+2 4 8 16 32
+
+================================================================================
