@@ -1,4 +1,5 @@
 use crate::expr::{BinOp, Expr};
+use rand::Rng;
 use std::collections::HashMap;
 
 /// Runtime values
@@ -62,16 +63,18 @@ impl std::fmt::Display for Value {
 /// Stack-based expression evaluator
 pub struct Evaluator {
     pub variables: HashMap<String, Value>,
+    rng: rand::rngs::ThreadRng,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
         Evaluator {
             variables: HashMap::new(),
+            rng: rand::thread_rng(),
         }
     }
 
-    pub fn eval_expr(&self, expr: &Expr) -> Result<Value, String> {
+    pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, String> {
         match expr {
             Expr::Number(n) => Ok(Value::Number(*n)),
             Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
@@ -93,7 +96,7 @@ impl Evaluator {
         }
     }
 
-    fn eval_binary_op(&self, op: &BinOp, left: &Value, right: &Value) -> Result<Value, String> {
+    fn eval_binary_op(&mut self, op: &BinOp, left: &Value, right: &Value) -> Result<Value, String> {
         // String concatenation with +
         if *op == BinOp::Add {
             if let (Value::String(l), Value::String(r)) = (left, right) {
@@ -137,7 +140,7 @@ impl Evaluator {
         Ok(result)
     }
 
-    fn eval_function(&self, name: &str, args: &[Expr]) -> Result<Value, String> {
+    fn eval_function(&mut self, name: &str, args: &[Expr]) -> Result<Value, String> {
         match name {
             "INT" => {
                 if args.len() != 1 {
@@ -161,13 +164,13 @@ impl Evaluator {
                 Ok(Value::Number(val.sqrt()))
             }
             "RND" => {
-                // Simple pseudo-random: always return a fixed value for deterministic testing
-                // In a real interpreter, use a PRNG
                 if args.len() != 1 {
                     return Err("RND expects 1 argument".to_string());
                 }
-                // For now, return a pseudo-random value
-                Ok(Value::Number(0.5))
+                let _arg = self.eval_expr(&args[0])?.as_number()?;
+                // MS-BASIC RND returns a random float in [0.0, 1.0)
+                let val: f64 = self.rng.gen();
+                Ok(Value::Number(val))
             }
             "LEN" => {
                 if args.len() != 1 {
@@ -194,7 +197,7 @@ mod tests {
         let tokens = Lexer::new(input).tokenize();
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
-        let evaluator = Evaluator::new();
+        let mut evaluator = Evaluator::new();
         evaluator.eval_expr(&expr).unwrap()
     }
 
@@ -343,15 +346,198 @@ mod tests {
     }
 
     #[test]
+    fn test_eval_int_zero() {
+        assert_eq!(eval("INT(0.0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_int_already_integer() {
+        assert_eq!(eval("INT(5)"), Value::Number(5.0));
+    }
+
+    #[test]
+    fn test_eval_int_negative_exact() {
+        assert_eq!(eval("INT(-4)"), Value::Number(-4.0));
+    }
+
+    #[test]
+    fn test_eval_int_with_expression() {
+        assert_eq!(eval("INT(7 / 2)"), Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_eval_int_wrong_arg_count() {
+        let tokens = Lexer::new("INT()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
     fn test_eval_abs_function() {
         assert_eq!(eval("ABS(-5)"), Value::Number(5.0));
         assert_eq!(eval("ABS(5)"), Value::Number(5.0));
     }
 
     #[test]
+    fn test_eval_abs_zero() {
+        assert_eq!(eval("ABS(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_abs_float() {
+        assert_eq!(eval("ABS(-3.14)"), Value::Number(3.14));
+    }
+
+    #[test]
+    fn test_eval_abs_with_expression() {
+        assert_eq!(eval("ABS(3 - 10)"), Value::Number(7.0));
+    }
+
+    #[test]
+    fn test_eval_abs_wrong_arg_count() {
+        let tokens = Lexer::new("ABS()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
     fn test_eval_sqr_function() {
         assert_eq!(eval("SQR(9)"), Value::Number(3.0));
         assert_eq!(eval("SQR(16)"), Value::Number(4.0));
+    }
+
+    #[test]
+    fn test_eval_sqr_zero() {
+        assert_eq!(eval("SQR(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_sqr_one() {
+        assert_eq!(eval("SQR(1)"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_sqr_non_perfect() {
+        let result = eval("SQR(2)");
+        if let Value::Number(n) = result {
+            assert!((n - std::f64::consts::SQRT_2).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_sqr_with_expression() {
+        assert_eq!(eval("SQR(4 + 5)"), Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_eval_sqr_wrong_arg_count() {
+        let tokens = Lexer::new("SQR()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_rnd_returns_in_range() {
+        // RND(1) should return a value in [0.0, 1.0)
+        for _ in 0..100 {
+            let result = eval("RND(1)");
+            if let Value::Number(n) = result {
+                assert!(n >= 0.0, "RND returned {} which is < 0.0", n);
+                assert!(n < 1.0, "RND returned {} which is >= 1.0", n);
+            } else {
+                panic!("Expected number from RND");
+            }
+        }
+    }
+
+    #[test]
+    fn test_eval_rnd_produces_varying_values() {
+        // Run RND many times and verify we don't always get the same value
+        let mut values = std::collections::HashSet::new();
+        for _ in 0..50 {
+            if let Value::Number(n) = eval("RND(1)") {
+                values.insert(n.to_bits());
+            }
+        }
+        assert!(values.len() > 1, "RND returned the same value every time");
+    }
+
+    #[test]
+    fn test_eval_rnd_wrong_arg_count() {
+        let tokens = Lexer::new("RND()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_rnd_in_expression() {
+        // INT(RND(1) * 10) should produce an integer in [0, 9]
+        for _ in 0..100 {
+            let result = eval("INT(RND(1) * 10)");
+            if let Value::Number(n) = result {
+                assert!(n >= 0.0 && n <= 9.0, "INT(RND(1)*10) returned {}", n);
+                assert_eq!(n, n.floor(), "Expected integer, got {}", n);
+            } else {
+                panic!("Expected number");
+            }
+        }
+    }
+
+    #[test]
+    fn test_eval_len_function() {
+        assert_eq!(eval("LEN(\"HELLO\")"), Value::Number(5.0));
+    }
+
+    #[test]
+    fn test_eval_len_empty_string() {
+        assert_eq!(eval("LEN(\"\")"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_len_single_char() {
+        assert_eq!(eval("LEN(\"A\")"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_len_with_spaces() {
+        assert_eq!(eval("LEN(\"A B C\")"), Value::Number(5.0));
+    }
+
+    #[test]
+    fn test_eval_len_wrong_type() {
+        let tokens = Lexer::new("LEN(42)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_len_wrong_arg_count() {
+        let tokens = Lexer::new("LEN()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_unknown_function() {
+        let tokens = Lexer::new("FOO(1)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
     }
 
     #[test]
@@ -370,7 +556,7 @@ mod tests {
         let tokens = Lexer::new("1 / 0").tokenize();
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
-        let evaluator = Evaluator::new();
+        let mut evaluator = Evaluator::new();
         assert!(evaluator.eval_expr(&expr).is_err());
     }
 
@@ -379,7 +565,7 @@ mod tests {
         let tokens = Lexer::new("UNDEFINED").tokenize();
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
-        let evaluator = Evaluator::new();
+        let mut evaluator = Evaluator::new();
         assert!(evaluator.eval_expr(&expr).is_err());
     }
 
