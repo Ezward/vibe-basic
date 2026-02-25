@@ -1,0 +1,45 @@
+mod ast;
+mod eval;
+mod expr;
+mod interpreter;
+mod token;
+
+use std::env;
+use std::fs;
+use std::io;
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: qwen_basic <filename.bas>");
+        std::process::exit(1);
+    }
+
+    let filename = &args[1];
+    let source = match fs::read_to_string(filename) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading file '{}': {}", filename, e);
+            std::process::exit(1);
+        }
+    };
+
+    let tokens = token::Lexer::new(&source).tokenize();
+    let mut parser = ast::Parser::new(&tokens);
+    let program = match parser.parse_program() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
+
+    if let Err(e) = interp.run(&program) {
+        eprintln!("Runtime error: {}", e);
+        std::process::exit(1);
+    }
+}

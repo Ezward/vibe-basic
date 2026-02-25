@@ -1,0 +1,401 @@
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    // Literals
+    Number(f64),
+    StringLiteral(String),
+    // Identifiers / variables
+    Identifier(String),
+    // Keywords
+    Let,
+    Print,
+    If,
+    Then,
+    Goto,
+    Input,
+    For,
+    To,
+    Step,
+    Next,
+    Rem(String),
+    End,
+    // Operators
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    // Delimiters
+    LeftParen,
+    RightParen,
+    Comma,
+    Semicolon,
+    Colon,
+    // Special
+    Newline,
+    Eof,
+}
+
+pub struct Lexer {
+    input: Vec<char>,
+    pos: usize,
+}
+
+impl Lexer {
+    pub fn new(input: &str) -> Self {
+        Lexer {
+            input: input.chars().collect(),
+            pos: 0,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input.get(self.pos).copied()
+    }
+
+    fn advance(&mut self) -> Option<char> {
+        let ch = self.input.get(self.pos).copied();
+        self.pos += 1;
+        ch
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(ch) = self.peek() {
+            if ch == ' ' || ch == '\t' || ch == '\r' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn read_number(&mut self) -> Token {
+        let mut s = String::new();
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_digit() {
+                s.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if self.peek() == Some('.') {
+            s.push('.');
+            self.advance();
+            while let Some(ch) = self.peek() {
+                if ch.is_ascii_digit() {
+                    s.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        Token::Number(s.parse::<f64>().unwrap())
+    }
+
+    fn read_string(&mut self) -> Token {
+        self.advance(); // skip opening quote
+        let mut s = String::new();
+        while let Some(ch) = self.peek() {
+            if ch == '"' {
+                self.advance();
+                break;
+            }
+            s.push(ch);
+            self.advance();
+        }
+        Token::StringLiteral(s)
+    }
+
+    fn read_identifier_or_keyword(&mut self) -> Token {
+        let mut s = String::new();
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                s.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        // Check for type sigil
+        if let Some(ch) = self.peek() {
+            if ch == '$' || ch == '%' || ch == '!' || ch == '#' {
+                s.push(ch);
+                self.advance();
+            }
+        }
+        let upper = s.to_uppercase();
+        match upper.as_str() {
+            "LET" => Token::Let,
+            "PRINT" => Token::Print,
+            "IF" => Token::If,
+            "THEN" => Token::Then,
+            "GOTO" => Token::Goto,
+            "INPUT" => Token::Input,
+            "FOR" => Token::For,
+            "TO" => Token::To,
+            "STEP" => Token::Step,
+            "NEXT" => Token::Next,
+            "END" => Token::End,
+            "REM" => {
+                // Consume rest of line as remark
+                let mut comment = String::new();
+                while let Some(ch) = self.peek() {
+                    if ch == '\n' {
+                        break;
+                    }
+                    comment.push(ch);
+                    self.advance();
+                }
+                Token::Rem(comment.trim().to_string())
+            }
+            _ => Token::Identifier(upper),
+        }
+    }
+
+    pub fn tokenize(&mut self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                None => {
+                    tokens.push(Token::Eof);
+                    break;
+                }
+                Some('\n') => {
+                    self.advance();
+                    tokens.push(Token::Newline);
+                }
+                Some('\'') => {
+                    self.advance();
+                    let mut comment = String::new();
+                    while let Some(ch) = self.peek() {
+                        if ch == '\n' {
+                            break;
+                        }
+                        comment.push(ch);
+                        self.advance();
+                    }
+                    tokens.push(Token::Rem(comment.trim().to_string()));
+                }
+                Some('"') => tokens.push(self.read_string()),
+                Some('+') => {
+                    self.advance();
+                    tokens.push(Token::Plus);
+                }
+                Some('-') => {
+                    self.advance();
+                    tokens.push(Token::Minus);
+                }
+                Some('*') => {
+                    self.advance();
+                    tokens.push(Token::Star);
+                }
+                Some('/') => {
+                    self.advance();
+                    tokens.push(Token::Slash);
+                }
+                Some('^') => {
+                    self.advance();
+                    tokens.push(Token::Caret);
+                }
+                Some('=') => {
+                    self.advance();
+                    tokens.push(Token::Equal);
+                }
+                Some('<') => {
+                    self.advance();
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        tokens.push(Token::NotEqual);
+                    } else if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::LessEqual);
+                    } else {
+                        tokens.push(Token::Less);
+                    }
+                }
+                Some('>') => {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::GreaterEqual);
+                    } else {
+                        tokens.push(Token::Greater);
+                    }
+                }
+                Some('(') => {
+                    self.advance();
+                    tokens.push(Token::LeftParen);
+                }
+                Some(')') => {
+                    self.advance();
+                    tokens.push(Token::RightParen);
+                }
+                Some(',') => {
+                    self.advance();
+                    tokens.push(Token::Comma);
+                }
+                Some(';') => {
+                    self.advance();
+                    tokens.push(Token::Semicolon);
+                }
+                Some(':') => {
+                    self.advance();
+                    tokens.push(Token::Colon);
+                }
+                Some(ch) if ch.is_ascii_digit() => {
+                    tokens.push(self.read_number());
+                }
+                Some(ch) if ch.is_ascii_alphabetic() => {
+                    tokens.push(self.read_identifier_or_keyword());
+                }
+                Some(ch) => {
+                    // Skip unknown characters
+                    self.advance();
+                    eprintln!("Warning: skipping unknown character '{}'", ch);
+                }
+            }
+        }
+        tokens
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tokenize_number() {
+        let tokens = Lexer::new("42").tokenize();
+        assert_eq!(tokens, vec![Token::Number(42.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_float() {
+        let tokens = Lexer::new("3.14").tokenize();
+        assert_eq!(tokens, vec![Token::Number(3.14), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_string() {
+        let tokens = Lexer::new("\"HELLO\"").tokenize();
+        assert_eq!(tokens, vec![Token::StringLiteral("HELLO".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_operators() {
+        let tokens = Lexer::new("+ - * / ^ = <> < > <= >=").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Plus,
+                Token::Minus,
+                Token::Star,
+                Token::Slash,
+                Token::Caret,
+                Token::Equal,
+                Token::NotEqual,
+                Token::Less,
+                Token::Greater,
+                Token::LessEqual,
+                Token::GreaterEqual,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_keywords() {
+        let tokens = Lexer::new("LET PRINT IF THEN GOTO INPUT FOR TO STEP NEXT END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Let,
+                Token::Print,
+                Token::If,
+                Token::Then,
+                Token::Goto,
+                Token::Input,
+                Token::For,
+                Token::To,
+                Token::Step,
+                Token::Next,
+                Token::End,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_case_insensitive() {
+        let tokens = Lexer::new("let print if").tokenize();
+        assert_eq!(tokens, vec![Token::Let, Token::Print, Token::If, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_variable_with_sigil() {
+        let tokens = Lexer::new("N$ X% A! B#").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("N$".to_string()),
+                Token::Identifier("X%".to_string()),
+                Token::Identifier("A!".to_string()),
+                Token::Identifier("B#".to_string()),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_remark() {
+        let tokens = Lexer::new("REM THIS IS A COMMENT").tokenize();
+        assert_eq!(tokens, vec![Token::Rem("THIS IS A COMMENT".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_basic_line() {
+        let tokens = Lexer::new("10 PRINT \"HELLO\"\n").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Print,
+                Token::StringLiteral("HELLO".to_string()),
+                Token::Newline,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_expression() {
+        let tokens = Lexer::new("(A + B) * 2").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::LeftParen,
+                Token::Identifier("A".to_string()),
+                Token::Plus,
+                Token::Identifier("B".to_string()),
+                Token::RightParen,
+                Token::Star,
+                Token::Number(2.0),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_delimiters() {
+        let tokens = Lexer::new(", ; :").tokenize();
+        assert_eq!(tokens, vec![Token::Comma, Token::Semicolon, Token::Colon, Token::Eof]);
+    }
+}
