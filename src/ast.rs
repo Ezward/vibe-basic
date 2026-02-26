@@ -53,23 +53,46 @@ pub enum ThenClause {
 pub struct Line {
     pub line_number: u32,
     pub statements: Vec<Statement>,
+    /// 1-based source file line number where this BASIC line appeared
+    pub source_line: usize,
 }
 
 /// A complete BASIC program
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub lines: Vec<Line>,
+    /// Original source lines (0-indexed) for error reporting
+    pub source_lines: Vec<String>,
 }
 
 /// Parser for BASIC programs
 pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    /// Current 1-based source file line number
+    source_line: usize,
+    /// Original source lines for error context
+    source_lines: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Token]) -> Self {
-        Parser { tokens, pos: 0 }
+    pub fn new(tokens: &'a [Token], source_lines: Vec<String>) -> Self {
+        Parser {
+            tokens,
+            pos: 0,
+            source_line: 1,
+            source_lines,
+        }
+    }
+
+    /// Format an error message with source line context
+    fn error_with_context(&self, msg: String) -> String {
+        let line_text = self
+            .source_lines
+            .get(self.source_line - 1)
+            .map(|s| s.as_str())
+            .unwrap_or("<unknown>");
+        format!("{}\n  at line {}: {}", msg, self.source_line, line_text)
     }
 
     fn peek(&self) -> &Token {
@@ -88,7 +111,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(n)
             }
-            ref tok => Err(format!("Expected number, got {:?}", tok)),
+            ref tok => {
+                let msg = format!("Expected number, got {:?}", tok);
+                Err(self.error_with_context(msg))
+            }
         }
     }
 
@@ -98,7 +124,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(name)
             }
-            ref tok => Err(format!("Expected identifier, got {:?}", tok)),
+            ref tok => {
+                let msg = format!("Expected identifier, got {:?}", tok);
+                Err(self.error_with_context(msg))
+            }
         }
     }
 
@@ -108,7 +137,7 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self) -> Result<Expr, String> {
         let mut expr_parser = ExprParser::new(&self.tokens[self.pos..]);
-        let result = expr_parser.parse_expression()?;
+        let result = expr_parser.parse_expression().map_err(|e| self.error_with_context(e))?;
         self.pos += expr_parser.pos();
         Ok(result)
     }
@@ -119,6 +148,7 @@ impl<'a> Parser<'a> {
             // Skip blank lines
             while *self.peek() == Token::Newline {
                 self.advance();
+                self.source_line += 1;
             }
             if *self.peek() == Token::Eof {
                 break;
@@ -127,10 +157,14 @@ impl<'a> Parser<'a> {
         }
         // Sort lines by line number
         lines.sort_by_key(|l| l.line_number);
-        Ok(Program { lines })
+        Ok(Program {
+            lines,
+            source_lines: self.source_lines.clone(),
+        })
     }
 
     fn parse_line(&mut self) -> Result<Line, String> {
+        let current_source_line = self.source_line;
         let line_number = self.expect_number()? as u32;
         let mut statements = Vec::new();
         statements.push(self.parse_statement()?);
@@ -141,10 +175,12 @@ impl<'a> Parser<'a> {
         // Consume newline or EOF
         if *self.peek() == Token::Newline {
             self.advance();
+            self.source_line += 1;
         }
         Ok(Line {
             line_number,
             statements,
+            source_line: current_source_line,
         })
     }
 
@@ -197,14 +233,18 @@ impl<'a> Parser<'a> {
                 // Implicit LET: variable = expression
                 self.parse_let_body()
             }
-            ref tok => Err(format!("Unexpected token at start of statement: {:?}", tok)),
+            ref tok => {
+                let msg = format!("Unexpected token at start of statement: {:?}", tok);
+                Err(self.error_with_context(msg))
+            }
         }
     }
 
     fn parse_let_body(&mut self) -> Result<Statement, String> {
         let variable = self.expect_identifier()?;
         if *self.peek() != Token::Equal {
-            return Err(format!("Expected '=' after variable in LET, got {:?}", self.peek()));
+            let msg = format!("Expected '=' after variable in LET, got {:?}", self.peek());
+            return Err(self.error_with_context(msg));
         }
         self.advance();
         let expression = self.parse_expression()?;
@@ -235,7 +275,8 @@ impl<'a> Parser<'a> {
     fn parse_if(&mut self) -> Result<Statement, String> {
         let condition = self.parse_expression()?;
         if *self.peek() != Token::Then {
-            return Err(format!("Expected THEN, got {:?}", self.peek()));
+            let msg = format!("Expected THEN, got {:?}", self.peek());
+            return Err(self.error_with_context(msg));
         }
         self.advance();
         // THEN can be followed by a line number or a statement
@@ -265,14 +306,17 @@ impl<'a> Parser<'a> {
                     variable = self.expect_identifier()?;
                 } else {
                     // This shouldn't happen in valid BASIC, but handle gracefully
-                    return Err("Expected ';' after INPUT prompt string".to_string());
+                    return Err(self.error_with_context("Expected ';' after INPUT prompt string".to_string()));
                 }
             }
             Token::Identifier(_) => {
                 prompt = None;
                 variable = self.expect_identifier()?;
             }
-            ref tok => return Err(format!("Expected variable or string in INPUT, got {:?}", tok)),
+            ref tok => {
+                let msg = format!("Expected variable or string in INPUT, got {:?}", tok);
+                return Err(self.error_with_context(msg));
+            }
         }
 
         Ok(Statement::Input { prompt, variable })
@@ -281,12 +325,12 @@ impl<'a> Parser<'a> {
     fn parse_for(&mut self) -> Result<Statement, String> {
         let variable = self.expect_identifier()?;
         if *self.peek() != Token::Equal {
-            return Err("Expected '=' in FOR".to_string());
+            return Err(self.error_with_context("Expected '=' in FOR".to_string()));
         }
         self.advance();
         let start = self.parse_expression()?;
         if *self.peek() != Token::To {
-            return Err("Expected TO in FOR".to_string());
+            return Err(self.error_with_context("Expected TO in FOR".to_string()));
         }
         self.advance();
         let end = self.parse_expression()?;
@@ -313,7 +357,8 @@ mod tests {
 
     fn parse_program(input: &str) -> Program {
         let tokens = Lexer::new(input).tokenize();
-        let mut parser = Parser::new(&tokens);
+        let source_lines: Vec<String> = input.lines().map(String::from).collect();
+        let mut parser = Parser::new(&tokens, source_lines);
         parser.parse_program().unwrap()
     }
 
