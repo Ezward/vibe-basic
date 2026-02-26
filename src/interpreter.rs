@@ -46,12 +46,27 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
             while stmt_idx < line.statements.len() {
                 let stmt = &line.statements[stmt_idx];
-                match self.execute_statement(stmt, line_idx, program)? {
+                let result = self.execute_statement(stmt, line_idx, program).map_err(|e| {
+                    let source_text = program
+                        .source_lines
+                        .get(line.source_line - 1)
+                        .map(|s| s.as_str())
+                        .unwrap_or("<unknown>");
+                    format!("{}\n  at line {}: {}", e, line.source_line, source_text)
+                });
+                match result? {
                     StmtResult::Continue => {
                         stmt_idx += 1;
                     }
                     StmtResult::Goto(target_line) => {
-                        next_line_idx = self.find_line_index(program, target_line)?;
+                        next_line_idx = self.find_line_index(program, target_line).map_err(|e| {
+                            let source_text = program
+                                .source_lines
+                                .get(line.source_line - 1)
+                                .map(|s| s.as_str())
+                                .unwrap_or("<unknown>");
+                            format!("{}\n  at line {}: {}", e, line.source_line, source_text)
+                        })?;
                         jumped = true;
                         break;
                     }
@@ -318,7 +333,8 @@ pub fn run_program_with_input(source: &str, input: &str) -> Result<String, Strin
     use std::io;
 
     let tokens = Lexer::new(source).tokenize();
-    let mut parser = Parser::new(&tokens);
+    let source_lines: Vec<String> = source.lines().map(String::from).collect();
+    let mut parser = Parser::new(&tokens, source_lines);
     let program = parser.parse_program()?;
 
     let input_reader = io::Cursor::new(input.to_string());

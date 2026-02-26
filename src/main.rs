@@ -25,7 +25,8 @@ fn main() {
     };
 
     let tokens = token::Lexer::new(&source).tokenize();
-    let mut parser = ast::Parser::new(&tokens);
+    let source_lines: Vec<String> = source.lines().map(String::from).collect();
+    let mut parser = ast::Parser::new(&tokens, source_lines);
     let program = match parser.parse_program() {
         Ok(p) => p,
         Err(e) => {
