@@ -11,7 +11,8 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
 
 3. Next, create a parser for basic statements and programs that parses them into an abstract syntax tree.
 - include unit tests that check the structure of the abstract syntax tree.
-
+- The statement parser should kips whitespace at the beginning of a line
+- The statement parser should ignore empty lines.
 4. Next, create an interpreter for basic programs that will run the program write any output to stdout.
 - include unit tests the run example programs and checks their output.
 
