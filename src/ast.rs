@@ -655,6 +655,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_leading_whitespace() {
+        let input = "\
+    10 PRINT \"A\"
+    20 END
+";
+        let prog = parse_program(input);
+        assert_eq!(prog.lines.len(), 2);
+        assert_eq!(prog.lines[0].line_number, 10);
+        assert_eq!(prog.lines[1].line_number, 20);
+    }
+
+    #[test]
+    fn test_parse_empty_lines() {
+        let input = "\n10 PRINT \"A\"\n\n20 PRINT \"B\"\n\n30 END\n";
+        let prog = parse_program(input);
+        assert_eq!(prog.lines.len(), 3);
+        assert_eq!(prog.lines[0].line_number, 10);
+        assert_eq!(prog.lines[1].line_number, 20);
+        assert_eq!(prog.lines[2].line_number, 30);
+    }
+
+    #[test]
+    fn test_parse_leading_whitespace_and_empty_lines() {
+        let input = "\n    10 PRINT \"A\"\n\n    20 END\n\n";
+        let prog = parse_program(input);
+        assert_eq!(prog.lines.len(), 2);
+        assert_eq!(prog.lines[0].line_number, 10);
+        assert_eq!(prog.lines[1].line_number, 20);
+    }
+
+    #[test]
     fn test_parse_if_then_implicit_let() {
         // IF condition THEN variable = expr (implicit LET after THEN)
         let stmt = parse_single_statement("50 IF N / D = INT(N / D) THEN ISPRIME = 0");

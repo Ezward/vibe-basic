@@ -398,4 +398,28 @@ mod tests {
         let tokens = Lexer::new(", ; :").tokenize();
         assert_eq!(tokens, vec![Token::Comma, Token::Semicolon, Token::Colon, Token::Eof]);
     }
+
+    #[test]
+    fn test_tokenize_leading_whitespace() {
+        let tokens = Lexer::new("   10 PRINT \"HI\"\n").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Print,
+                Token::StringLiteral("HI".to_string()),
+                Token::Newline,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_empty_lines() {
+        let tokens = Lexer::new("\n\n10 END\n\n").tokenize();
+        assert_eq!(
+            tokens,
+            vec![Token::Newline, Token::Newline, Token::Number(10.0), Token::End, Token::Newline, Token::Newline, Token::Eof]
+        );
+    }
 }

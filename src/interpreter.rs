@@ -603,6 +603,31 @@ mod tests {
     }
 
     #[test]
+    fn test_leading_whitespace_on_lines() {
+        let output = run_program(
+            "\
+    10 PRINT \"A\"
+    20 PRINT \"B\"
+    30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "A\nB\n");
+    }
+
+    #[test]
+    fn test_empty_lines_in_program() {
+        let output = run_program("\n10 PRINT \"A\"\n\n20 PRINT \"B\"\n\n30 END\n").unwrap();
+        assert_eq!(output, "A\nB\n");
+    }
+
+    #[test]
+    fn test_leading_whitespace_and_empty_lines() {
+        let output = run_program("\n    10 LET X = 1\n\n    20 PRINT X\n\n    30 END\n").unwrap();
+        assert_eq!(output, " 1 \n");
+    }
+
+    #[test]
     fn test_nested_for_loops() {
         let output = run_program(
             "\
