@@ -1,3 +1,12 @@
+//! Lexical analysis (tokenization) for BASIC source code.
+//!
+//! This module provides the `Token` enum representing all lexical tokens in the
+//! BASIC language, and the `Lexer` struct which converts raw source text into a
+//! sequence of tokens. The lexer handles case-insensitive keywords, BASIC variable
+//! type sigils ($, %, !, #), numeric and string literals, operators, and comments
+//! (both REM keyword and apostrophe syntax).
+
+/// Represents a single lexical token in the BASIC language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Literals
@@ -41,12 +50,17 @@ pub enum Token {
     Eof,
 }
 
+/// Lexical analyzer that converts BASIC source text into a stream of tokens.
+///
+/// The lexer processes the input character by character, recognizing keywords,
+/// identifiers, numeric literals, string literals, operators, and comments.
 pub struct Lexer {
     input: Vec<char>,
     pos: usize,
 }
 
 impl Lexer {
+    /// Creates a new lexer from the given source text.
     pub fn new(input: &str) -> Self {
         Lexer {
             input: input.chars().collect(),
@@ -54,16 +68,19 @@ impl Lexer {
         }
     }
 
+    /// Returns the current character without advancing the position.
     fn peek(&self) -> Option<char> {
         self.input.get(self.pos).copied()
     }
 
+    /// Advances the position by one and returns the character that was at the old position.
     fn advance(&mut self) -> Option<char> {
         let ch = self.input.get(self.pos).copied();
         self.pos += 1;
         ch
     }
 
+    /// Skips horizontal whitespace (spaces, tabs, carriage returns) but not newlines.
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.peek() {
             if ch == ' ' || ch == '\t' || ch == '\r' {
@@ -74,6 +91,7 @@ impl Lexer {
         }
     }
 
+    /// Reads a numeric literal (integer or floating-point) starting at the current position.
     fn read_number(&mut self) -> Token {
         let mut s = String::new();
         while let Some(ch) = self.peek() {
@@ -99,6 +117,7 @@ impl Lexer {
         Token::Number(s.parse::<f64>().unwrap())
     }
 
+    /// Reads a double-quoted string literal, consuming the opening and closing quotes.
     fn read_string(&mut self) -> Token {
         self.advance(); // skip opening quote
         let mut s = String::new();
@@ -113,6 +132,10 @@ impl Lexer {
         Token::StringLiteral(s)
     }
 
+    /// Reads an identifier or keyword. Identifiers are uppercased for case-insensitive
+    /// matching. If followed by a BASIC type sigil ($, %, !, #), the sigil is included.
+    /// Known keywords (LET, PRINT, IF, etc.) are returned as their specific token variants;
+    /// REM consumes the rest of the line as a comment.
     fn read_identifier_or_keyword(&mut self) -> Token {
         let mut s = String::new();
         while let Some(ch) = self.peek() {
@@ -159,6 +182,8 @@ impl Lexer {
         }
     }
 
+    /// Tokenizes the entire input, returning a vector of tokens ending with `Token::Eof`.
+    /// Unknown characters are skipped with a warning printed to stderr.
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
         loop {

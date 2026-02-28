@@ -1,6 +1,14 @@
+//! Expression parsing for BASIC.
+//!
+//! This module defines the expression AST nodes (`Expr`, `BinOp`) and provides
+//! a recursive descent `ExprParser` that handles operator precedence. The
+//! precedence levels from lowest to highest are: comparison, addition/subtraction,
+//! multiplication/division, exponentiation, unary minus, and primary factors
+//! (literals, variables, parenthesized expressions, function calls).
+
 use crate::token::Token;
 
-/// Expression parse tree node
+/// An expression node in the parse tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
@@ -18,6 +26,7 @@ pub enum Expr {
     },
 }
 
+/// Binary operators supported in BASIC expressions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
     Add,
@@ -40,18 +49,23 @@ pub struct ExprParser<'a> {
 }
 
 impl<'a> ExprParser<'a> {
+    /// Creates a new expression parser starting at position 0 within the given token slice.
     pub fn new(tokens: &'a [Token]) -> Self {
         ExprParser { tokens, pos: 0 }
     }
 
+    /// Returns the number of tokens consumed so far, used by the statement parser
+    /// to advance its own position after delegating to the expression parser.
     pub fn pos(&self) -> usize {
         self.pos
     }
 
+    /// Returns the current token without advancing.
     fn peek(&self) -> &Token {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
 
+    /// Advances past the current token and returns it.
     fn advance(&mut self) -> &Token {
         let tok = self.tokens.get(self.pos).unwrap_or(&Token::Eof);
         self.pos += 1;
