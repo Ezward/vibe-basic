@@ -1,7 +1,16 @@
+//! Abstract Syntax Tree (AST) definitions and parser for BASIC programs.
+//!
+//! This module defines the AST node types (`Statement`, `PrintItem`, `ThenClause`,
+//! `Line`, `Program`) that represent a parsed BASIC program, and provides the
+//! `Parser` struct which converts a token stream into the AST. The parser handles
+//! line numbers, multi-statement lines (colon-separated), and all BASIC statement
+//! types including LET (explicit and implicit), PRINT, IF/THEN, GOTO, INPUT,
+//! FOR/NEXT, REM, and END.
+
 use crate::expr::{Expr, ExprParser};
 use crate::token::Token;
 
-/// AST node for a BASIC statement
+/// AST node representing a single BASIC statement.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Let {
@@ -35,6 +44,7 @@ pub enum Statement {
     End,
 }
 
+/// Represents an item within a PRINT statement's output list.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintItem {
     Expression(Expr),
@@ -42,6 +52,7 @@ pub enum PrintItem {
     Comma,
 }
 
+/// Represents the target of an IF/THEN: either a line number or an inline statement.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThenClause {
     LineNumber(u32),
@@ -76,6 +87,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    /// Creates a new parser from a token slice and the original source lines (for error messages).
     pub fn new(tokens: &'a [Token], source_lines: Vec<String>) -> Self {
         Parser {
             tokens,
@@ -95,16 +107,19 @@ impl<'a> Parser<'a> {
         format!("{}\n  at line {}: {}", msg, self.source_line, line_text)
     }
 
+    /// Returns the current token without advancing.
     fn peek(&self) -> &Token {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
 
+    /// Advances past the current token and returns it.
     fn advance(&mut self) -> &Token {
         let tok = self.tokens.get(self.pos).unwrap_or(&Token::Eof);
         self.pos += 1;
         tok
     }
 
+    /// Consumes and returns a number token, or returns an error with source context.
     fn expect_number(&mut self) -> Result<f64, String> {
         match self.peek().clone() {
             Token::Number(n) => {
@@ -118,6 +133,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consumes and returns an identifier token, or returns an error with source context.
     fn expect_identifier(&mut self) -> Result<String, String> {
         match self.peek().clone() {
             Token::Identifier(name) => {
@@ -131,10 +147,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Returns true if the current token indicates the end of a statement (newline, EOF, or colon).
     fn at_statement_end(&self) -> bool {
         matches!(self.peek(), Token::Newline | Token::Eof | Token::Colon)
     }
 
+    /// Delegates expression parsing to the dedicated `ExprParser`, advancing past consumed tokens.
     fn parse_expression(&mut self) -> Result<Expr, String> {
         let mut expr_parser = ExprParser::new(&self.tokens[self.pos..]);
         let result = expr_parser.parse_expression().map_err(|e| self.error_with_context(e))?;
@@ -142,6 +160,7 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
+    /// Parses all lines into a `Program`, skipping blank lines and sorting by line number.
     pub fn parse_program(&mut self) -> Result<Program, String> {
         let mut lines = Vec::new();
         loop {
@@ -163,6 +182,7 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parses a single BASIC line: a line number followed by one or more colon-separated statements.
     fn parse_line(&mut self) -> Result<Line, String> {
         let current_source_line = self.source_line;
         let line_number = self.expect_number()? as u32;
@@ -184,6 +204,8 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parses a single statement by dispatching on the leading keyword token.
+    /// An identifier at the start of a statement is treated as an implicit LET.
     fn parse_statement(&mut self) -> Result<Statement, String> {
         match self.peek().clone() {
             Token::Let => {
@@ -240,6 +262,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses the body of a LET statement: `variable = expression`.
     fn parse_let_body(&mut self) -> Result<Statement, String> {
         let variable = self.expect_identifier()?;
         if *self.peek() != Token::Equal {
@@ -251,6 +274,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Let { variable, expression })
     }
 
+    /// Parses a PRINT statement's item list (expressions, semicolons, and commas).
     fn parse_print(&mut self) -> Result<Statement, String> {
         let mut items = Vec::new();
         while !self.at_statement_end() {
@@ -272,6 +296,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Print { items })
     }
 
+    /// Parses an IF statement: `IF condition THEN (line_number | statement)`.
     fn parse_if(&mut self) -> Result<Statement, String> {
         let condition = self.parse_expression()?;
         if *self.peek() != Token::Then {
@@ -292,6 +317,7 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parses an INPUT statement: `INPUT ["prompt";] variable`.
     fn parse_input(&mut self) -> Result<Statement, String> {
         // INPUT [string ";"] variable
         let prompt;
@@ -322,6 +348,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Input { prompt, variable })
     }
 
+    /// Parses a FOR statement: `FOR var = start TO end [STEP step]`.
     fn parse_for(&mut self) -> Result<Statement, String> {
         let variable = self.expect_identifier()?;
         if *self.peek() != Token::Equal {

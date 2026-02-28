@@ -1,8 +1,15 @@
+//! Expression evaluation and runtime value representation for BASIC.
+//!
+//! This module provides the `Value` enum for runtime values (numbers and strings),
+//! and the `Evaluator` struct which evaluates parsed expression trees against a
+//! variable store. It supports arithmetic, string concatenation, comparison operators
+//! (returning MS-BASIC style -1/0), and built-in functions (INT, ABS, SQR, RND, LEN).
+
 use crate::expr::{BinOp, Expr};
 use rand::Rng;
 use std::collections::HashMap;
 
-/// Runtime values
+/// A runtime value: either a floating-point number or a string.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
@@ -10,6 +17,7 @@ pub enum Value {
 }
 
 impl Value {
+    /// Extracts the numeric value, or returns an error if this is a string.
     pub fn as_number(&self) -> Result<f64, String> {
         match self {
             Value::Number(n) => Ok(*n),
@@ -17,6 +25,9 @@ impl Value {
         }
     }
 
+    /// Formats the value for PRINT output using MS-BASIC conventions:
+    /// positive numbers get a leading space, all numbers get a trailing space,
+    /// and integer-valued floats are printed without a decimal point.
     pub fn to_print_string(&self) -> String {
         match self {
             Value::Number(n) => {
@@ -37,6 +48,7 @@ impl Value {
         }
     }
 
+    /// Returns whether the value is truthy: non-zero for numbers, non-empty for strings.
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Number(n) => *n != 0.0,
@@ -46,6 +58,7 @@ impl Value {
 }
 
 impl std::fmt::Display for Value {
+    /// Displays the value: integers without a decimal point, strings as-is.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Number(n) => {
@@ -60,13 +73,14 @@ impl std::fmt::Display for Value {
     }
 }
 
-/// Stack-based expression evaluator
+/// Expression evaluator with a variable store and random number generator.
 pub struct Evaluator {
     pub variables: HashMap<String, Value>,
     rng: rand::rngs::ThreadRng,
 }
 
 impl Evaluator {
+    /// Creates a new evaluator with an empty variable store.
     pub fn new() -> Self {
         Evaluator {
             variables: HashMap::new(),
@@ -74,6 +88,7 @@ impl Evaluator {
         }
     }
 
+    /// Recursively evaluates an expression tree, returning a runtime `Value`.
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, String> {
         match expr {
             Expr::Number(n) => Ok(Value::Number(*n)),
@@ -96,6 +111,9 @@ impl Evaluator {
         }
     }
 
+    /// Evaluates a binary operation. Handles string concatenation with `+`, string
+    /// comparisons, numeric arithmetic, and numeric comparisons (returning -1 for
+    /// true and 0 for false, per MS-BASIC convention).
     fn eval_binary_op(&mut self, op: &BinOp, left: &Value, right: &Value) -> Result<Value, String> {
         // String concatenation with +
         if *op == BinOp::Add {
@@ -140,6 +158,9 @@ impl Evaluator {
         Ok(result)
     }
 
+    /// Evaluates a built-in function call. Supported functions:
+    /// INT (floor), ABS (absolute value), SQR (square root), RND (random [0,1)),
+    /// LEN (string length).
     fn eval_function(&mut self, name: &str, args: &[Expr]) -> Result<Value, String> {
         match name {
             "INT" => {

@@ -1,3 +1,9 @@
+//! Entry point for the Qwen BASIC interpreter.
+//!
+//! This module reads a BASIC source file, tokenizes it, parses it into an AST,
+//! and executes it through the interpreter. The pipeline is:
+//! source text -> Lexer (tokens) -> Parser (AST) -> Interpreter (execution).
+
 mod ast;
 mod eval;
 mod expr;
@@ -8,6 +14,8 @@ use std::env;
 use std::fs;
 use std::io;
 
+/// Runs the BASIC interpreter: reads the source file specified as a command-line
+/// argument, tokenizes and parses it, then executes the resulting program.
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {

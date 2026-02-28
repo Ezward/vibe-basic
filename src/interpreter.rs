@@ -1,8 +1,16 @@
+//! Program interpreter (runtime execution engine) for BASIC.
+//!
+//! This module provides the `Interpreter` struct which executes a parsed BASIC
+//! `Program`. It manages control flow (sequential execution, GOTO, IF/THEN branching,
+//! FOR/NEXT loops), performs I/O via generic `BufRead`/`Write` streams, and delegates
+//! expression evaluation to the `Evaluator`. PRINT formatting follows MS-BASIC
+//! conventions (14-character tab zones for commas, newline suppression with semicolons).
+
 use crate::ast::{PrintItem, Program, Statement, ThenClause};
 use crate::eval::{Evaluator, Value};
 use std::io::{BufRead, Write};
 
-/// FOR loop state
+/// Tracks the state of an active FOR loop on the loop stack.
 #[derive(Debug, Clone)]
 struct ForState {
     variable: String,
@@ -12,6 +20,7 @@ struct ForState {
     line_index: usize,
 }
 
+/// Runtime interpreter for BASIC programs, parameterized over input and output streams.
 pub struct Interpreter<R: BufRead, W: Write> {
     evaluator: Evaluator,
     input: R,
@@ -21,6 +30,7 @@ pub struct Interpreter<R: BufRead, W: Write> {
 }
 
 impl<R: BufRead, W: Write> Interpreter<R, W> {
+    /// Creates a new interpreter with the given input and output streams.
     pub fn new(input: R, output: W) -> Self {
         Interpreter {
             evaluator: Evaluator::new(),
@@ -31,6 +41,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         }
     }
 
+    /// Executes a BASIC program from the first line to completion. Handles sequential
+    /// execution, GOTO jumps, IF/THEN branching, FOR/NEXT loops, and END termination.
+    /// Errors include source line context for debugging.
     pub fn run(&mut self, program: &Program) -> Result<(), String> {
         if program.lines.is_empty() {
             return Ok(());
@@ -92,6 +105,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         Ok(())
     }
 
+    /// Finds the index of a BASIC line by its line number (for GOTO targets).
     fn find_line_index(&self, program: &Program, target_line: u32) -> Result<usize, String> {
         program
             .lines
@@ -100,6 +114,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             .ok_or_else(|| format!("Line {} not found", target_line))
     }
 
+    /// Executes a single statement and returns a `StmtResult` indicating control flow:
+    /// continue to next statement, jump to a line, end the program, skip remaining
+    /// statements on the current line, or skip past a FOR loop body.
     fn execute_statement(
         &mut self,
         stmt: &Statement,
@@ -220,6 +237,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         }
     }
 
+    /// Executes a PRINT statement. Commas advance to the next 14-character tab zone,
+    /// semicolons suppress spacing, and a trailing separator suppresses the newline.
     fn execute_print(&mut self, items: &[PrintItem]) -> Result<(), String> {
         if items.is_empty() {
             write!(self.output, "\n").map_err(|e| e.to_string())?;
@@ -259,6 +278,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         Ok(())
     }
 
+    /// Executes an INPUT statement: prints an optional prompt and "? ", reads a line,
+    /// and stores it as a string (for $ variables) or parses it as a number.
     fn execute_input(&mut self, prompt: Option<&str>, variable: &str) -> Result<(), String> {
         if let Some(p) = prompt {
             write!(self.output, "{}", p).map_err(|e| e.to_string())?;
@@ -284,6 +305,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         Ok(())
     }
 
+    /// Searches forward from a FOR statement to find its matching NEXT, respecting
+    /// nesting depth of intervening FOR/NEXT pairs.
     fn find_matching_next(&self, program: &Program, for_line_idx: usize, var: &str) -> Result<usize, String> {
         let mut depth = 0;
         for i in (for_line_idx + 1)..program.lines.len() {
@@ -311,6 +334,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     }
 }
 
+/// Control flow result returned by statement execution.
 enum StmtResult {
     Continue,
     Goto(u32),
