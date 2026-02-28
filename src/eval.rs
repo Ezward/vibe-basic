@@ -9,6 +9,19 @@ use crate::expr::{BinOp, Expr};
 use rand::Rng;
 use std::collections::HashMap;
 
+/// A work item on the evaluation stack. Each step is either an expression to
+/// evaluate or a pending operation waiting for its operands on the value stack.
+enum EvalStep<'a> {
+    /// Evaluate this expression node, pushing its result onto the value stack.
+    Eval(&'a Expr),
+    /// Pop one value, negate it, push the result.
+    ApplyUnaryMinus,
+    /// Pop two values (right then left), apply the operator, push the result.
+    ApplyBinaryOp(&'a BinOp),
+    /// Pop `arg_count` values, call the named built-in function, push the result.
+    ApplyFunction(&'a str, usize),
+}
+
 /// A runtime value: either a floating-point number or a string.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -88,27 +101,60 @@ impl Evaluator {
         }
     }
 
-    /// Recursively evaluates an expression tree, returning a runtime `Value`.
+    /// Evaluates an expression tree using an explicit work stack and value stack,
+    /// returning a runtime `Value`. This iterative approach enables future debugger
+    /// support for single-stepping through expression evaluation.
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, String> {
-        match expr {
-            Expr::Number(n) => Ok(Value::Number(*n)),
-            Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
-            Expr::Variable(name) => self
-                .variables
-                .get(name)
-                .cloned()
-                .ok_or_else(|| format!("Undefined variable: {}", name)),
-            Expr::UnaryMinus(inner) => {
-                let val = self.eval_expr(inner)?;
-                Ok(Value::Number(-val.as_number()?))
+        let mut work: Vec<EvalStep> = vec![EvalStep::Eval(expr)];
+        let mut values: Vec<Value> = Vec::new();
+
+        while let Some(step) = work.pop() {
+            match step {
+                EvalStep::Eval(e) => match e {
+                    Expr::Number(n) => values.push(Value::Number(*n)),
+                    Expr::StringLiteral(s) => values.push(Value::String(s.clone())),
+                    Expr::Variable(name) => {
+                        let val = self
+                            .variables
+                            .get(name)
+                            .cloned()
+                            .ok_or_else(|| format!("Undefined variable: {}", name))?;
+                        values.push(val);
+                    }
+                    Expr::UnaryMinus(inner) => {
+                        work.push(EvalStep::ApplyUnaryMinus);
+                        work.push(EvalStep::Eval(inner));
+                    }
+                    Expr::BinaryOp { op, left, right } => {
+                        work.push(EvalStep::ApplyBinaryOp(op));
+                        work.push(EvalStep::Eval(right));
+                        work.push(EvalStep::Eval(left));
+                    }
+                    Expr::FunctionCall { name, args } => {
+                        work.push(EvalStep::ApplyFunction(name, args.len()));
+                        for arg in args.iter().rev() {
+                            work.push(EvalStep::Eval(arg));
+                        }
+                    }
+                },
+                EvalStep::ApplyUnaryMinus => {
+                    let val = values.pop().expect("value stack underflow").as_number()?;
+                    values.push(Value::Number(-val));
+                }
+                EvalStep::ApplyBinaryOp(op) => {
+                    let rval = values.pop().expect("value stack underflow");
+                    let lval = values.pop().expect("value stack underflow");
+                    values.push(self.eval_binary_op(op, &lval, &rval)?);
+                }
+                EvalStep::ApplyFunction(name, arg_count) => {
+                    let start = values.len() - arg_count;
+                    let args: Vec<Value> = values.drain(start..).collect();
+                    values.push(self.apply_function(name, &args)?);
+                }
             }
-            Expr::BinaryOp { op, left, right } => {
-                let lval = self.eval_expr(left)?;
-                let rval = self.eval_expr(right)?;
-                self.eval_binary_op(op, &lval, &rval)
-            }
-            Expr::FunctionCall { name, args } => self.eval_function(name, args),
         }
+
+        Ok(values.pop().expect("value stack empty after evaluation"))
     }
 
     /// Evaluates a binary operation. Handles string concatenation with `+`, string
@@ -158,37 +204,37 @@ impl Evaluator {
         Ok(result)
     }
 
-    /// Evaluates a built-in function call. Supported functions:
-    /// INT (floor), ABS (absolute value), SQR (square root), RND (random [0,1)),
-    /// LEN (string length).
-    fn eval_function(&mut self, name: &str, args: &[Expr]) -> Result<Value, String> {
+    /// Applies a built-in function to pre-evaluated argument values. Supported
+    /// functions: INT (floor), ABS (absolute value), SQR (square root),
+    /// RND (random [0,1)), LEN (string length).
+    fn apply_function(&mut self, name: &str, args: &[Value]) -> Result<Value, String> {
         match name {
             "INT" => {
                 if args.len() != 1 {
                     return Err("INT expects 1 argument".to_string());
                 }
-                let val = self.eval_expr(&args[0])?.as_number()?;
+                let val = args[0].as_number()?;
                 Ok(Value::Number(val.floor()))
             }
             "ABS" => {
                 if args.len() != 1 {
                     return Err("ABS expects 1 argument".to_string());
                 }
-                let val = self.eval_expr(&args[0])?.as_number()?;
+                let val = args[0].as_number()?;
                 Ok(Value::Number(val.abs()))
             }
             "SQR" => {
                 if args.len() != 1 {
                     return Err("SQR expects 1 argument".to_string());
                 }
-                let val = self.eval_expr(&args[0])?.as_number()?;
+                let val = args[0].as_number()?;
                 Ok(Value::Number(val.sqrt()))
             }
             "RND" => {
                 if args.len() != 1 {
                     return Err("RND expects 1 argument".to_string());
                 }
-                let _arg = self.eval_expr(&args[0])?.as_number()?;
+                let _arg = args[0].as_number()?;
                 // MS-BASIC RND returns a random float in [0.0, 1.0)
                 let val: f64 = self.rng.gen();
                 Ok(Value::Number(val))
@@ -197,8 +243,7 @@ impl Evaluator {
                 if args.len() != 1 {
                     return Err("LEN expects 1 argument".to_string());
                 }
-                let val = self.eval_expr(&args[0])?;
-                match val {
+                match &args[0] {
                     Value::String(s) => Ok(Value::Number(s.len() as f64)),
                     _ => Err("LEN expects a string argument".to_string()),
                 }
