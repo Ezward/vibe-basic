@@ -19,6 +19,7 @@ pub enum Token {
     Print,
     If,
     Then,
+    Else,
     Goto,
     Input,
     For,
@@ -159,6 +160,7 @@ impl Lexer {
             "PRINT" => Token::Print,
             "IF" => Token::If,
             "THEN" => Token::Then,
+            "ELSE" => Token::Else,
             "GOTO" => Token::Goto,
             "INPUT" => Token::Input,
             "FOR" => Token::For,
@@ -338,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_tokenize_keywords() {
-        let tokens = Lexer::new("LET PRINT IF THEN GOTO INPUT FOR TO STEP NEXT END").tokenize();
+        let tokens = Lexer::new("LET PRINT IF THEN ELSE GOTO INPUT FOR TO STEP NEXT END").tokenize();
         assert_eq!(
             tokens,
             vec![
@@ -346,6 +348,7 @@ mod tests {
                 Token::Print,
                 Token::If,
                 Token::Then,
+                Token::Else,
                 Token::Goto,
                 Token::Input,
                 Token::For,

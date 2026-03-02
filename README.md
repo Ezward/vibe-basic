@@ -13,7 +13,7 @@ The full language specification — EBNF grammar, semantic explanations, and exa
 | LET | `[LET] var = expr` | Assign a value to a variable (`LET` keyword is optional) |
 | PRINT | `PRINT [expr_list]` | Output values to the screen |
 | INPUT | `INPUT ["prompt";] var` | Read user input into a variable |
-| IF/THEN | `IF expr THEN stmt\|linenum` | Conditional execution |
+| IF/THEN/ELSE | `IF expr THEN stmt\|linenum [ELSE stmt\|linenum]` | Conditional execution with optional ELSE branch |
 | GOTO | `GOTO linenum` | Unconditional jump to a line number |
 | FOR/NEXT | `FOR var = start TO end [STEP val]` | Counted loop |
 | REM | `REM text` or `' text` | Comment (ignored by interpreter) |
@@ -68,12 +68,13 @@ Multiple statements can appear on one line separated by colons:
 
 ```
 src/
-├── main.rs          — CLI entry point: reads .bas files and runs them
+├── main.rs          — CLI entry point: reads .bas files, supports --debug flag
 ├── token.rs         — Lexer/tokenizer: converts source text into tokens
 ├── expr.rs          — Expression parser: builds expression parse trees
-├── eval.rs          — Evaluator: evaluates expressions, handles built-in functions
+├── eval.rs          — Evaluator: stack-based iterative expression evaluator
 ├── ast.rs           — Statement/program parser: parses tokens into an AST
-└── interpreter.rs   — Interpreter: executes BASIC programs with full control flow
+├── interpreter.rs   — Interpreter: executes BASIC programs with full control flow
+└── debugger.rs      — Debugger: interactive step-through debugging REPL
 ```
 
 ## Building
@@ -104,6 +105,41 @@ Or use the compiled binary directly:
 ./target/release/qwen_basic myprogram.bas
 ```
 
+### Debug Mode
+
+Launch the interactive debugger with the `--debug` flag:
+
+```sh
+cargo run -- --debug examples/primes.bas
+```
+
+The debugger provides a REPL with the following commands:
+
+| Command | Description |
+|---------|-------------|
+| `STEP` | Execute one BASIC line |
+| `RUN` | Continue execution until a breakpoint or END |
+| `GOTO n` | Jump to line number n |
+| `BREAK AT n` | Set a breakpoint at line number n |
+| `BREAK IF expr` | Set a conditional breakpoint |
+| `LET var = expr` | Modify a variable during execution |
+| `PRINT expr` | Inspect a variable or expression |
+| `QUIT` | Exit the debugger |
+
+The prompt shows the current line number (e.g., `[DBG line 20]>`) or `[DBG finished]>` when the program has ended.
+
+### Example Programs
+
+Several example programs are included in the `examples/` directory:
+
+| File | Description |
+|------|-------------|
+| `hello.bas` | Powers of 2 using a FOR loop |
+| `count.bas` | Counting to N with user input |
+| `fibonacci.bas` | Fibonacci series with input validation |
+| `guessing_game.bas` | Number guessing game using RND and nested ELSE |
+| `primes.bas` | Prime number finder with nested FOR loops |
+
 ### Example Program
 
 Create a file `counter.bas`:
@@ -130,7 +166,7 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (157 tests):
+Run the full test suite (186 tests):
 
 ```sh
 cargo test
@@ -140,11 +176,12 @@ Tests are organized by module:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `token` | 11 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
-| `expr` | 22 | Expression parser: precedence, associativity, parentheses, functions |
-| `eval` | 57 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
-| `ast` | 26 | Statement parser: all statement types, multi-statement lines, full programs |
+| `token` | 13 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
+| `expr` | 26 | Expression parser: precedence, associativity, parentheses, functions |
+| `eval` | 61 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
+| `ast` | 32 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
 | `interpreter` | 41 | Integration: control flow, loops, I/O, example programs from the spec |
+| `debugger` | 13 | Debugger: stepping, breakpoints, variable inspection and modification |
 
 ## Formatting
 

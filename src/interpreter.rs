@@ -22,9 +22,9 @@ struct ForState {
 
 /// Runtime interpreter for BASIC programs, parameterized over input and output streams.
 pub struct Interpreter<R: BufRead, W: Write> {
-    evaluator: Evaluator,
-    input: R,
-    output: W,
+    pub(crate) evaluator: Evaluator,
+    pub(crate) input: R,
+    pub(crate) output: W,
     for_stack: Vec<ForState>,
     column: usize,
 }
@@ -106,7 +106,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     }
 
     /// Finds the index of a BASIC line by its line number (for GOTO targets).
-    fn find_line_index(&self, program: &Program, target_line: u32) -> Result<usize, String> {
+    pub(crate) fn find_line_index(&self, program: &Program, target_line: u32) -> Result<usize, String> {
         program
             .lines
             .iter()
@@ -117,7 +117,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     /// Executes a single statement and returns a `StmtResult` indicating control flow:
     /// continue to next statement, jump to a line, end the program, skip remaining
     /// statements on the current line, or skip past a FOR loop body.
-    fn execute_statement(
+    pub(crate) fn execute_statement(
         &mut self,
         stmt: &Statement,
         current_line_idx: usize,
@@ -133,10 +133,17 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 self.execute_print(items)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::If { condition, then } => {
+            Statement::If { condition, then, else_clause } => {
                 let val = self.evaluator.eval_expr(condition)?;
                 if val.is_truthy() {
                     match then.as_ref() {
+                        ThenClause::LineNumber(n) => Ok(StmtResult::Goto(*n)),
+                        ThenClause::Statement(inner_stmt) => {
+                            self.execute_statement(inner_stmt, current_line_idx, program)
+                        }
+                    }
+                } else if let Some(else_cl) = else_clause {
+                    match else_cl.as_ref() {
                         ThenClause::LineNumber(n) => Ok(StmtResult::Goto(*n)),
                         ThenClause::Statement(inner_stmt) => {
                             self.execute_statement(inner_stmt, current_line_idx, program)
@@ -239,7 +246,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
     /// Executes a PRINT statement. Commas advance to the next 14-character tab zone,
     /// semicolons suppress spacing, and a trailing separator suppresses the newline.
-    fn execute_print(&mut self, items: &[PrintItem]) -> Result<(), String> {
+    pub(crate) fn execute_print(&mut self, items: &[PrintItem]) -> Result<(), String> {
         if items.is_empty() {
             write!(self.output, "\n").map_err(|e| e.to_string())?;
             self.column = 0;
@@ -335,7 +342,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 }
 
 /// Control flow result returned by statement execution.
-enum StmtResult {
+pub(crate) enum StmtResult {
     Continue,
     Goto(u32),
     End,
@@ -682,5 +689,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, " 1  1  1  2 \n 2  1  2  2 \n");
+    }
+
+    #[test]
+    fn test_if_then_else_true_branch() {
+        let output = run_program("10 LET X = 5\n20 IF X = 5 THEN PRINT \"YES\" ELSE PRINT \"NO\"\n30 END\n").unwrap();
+        assert_eq!(output, "YES\n");
+    }
+
+    #[test]
+    fn test_if_then_else_false_branch() {
+        let output = run_program("10 LET X = 3\n20 IF X = 5 THEN PRINT \"YES\" ELSE PRINT \"NO\"\n30 END\n").unwrap();
+        assert_eq!(output, "NO\n");
+    }
+
+    #[test]
+    fn test_if_then_else_with_goto() {
+        let output = run_program(
+            "\
+10 LET X = 0
+20 IF X = 1 THEN GOTO 50 ELSE GOTO 40
+30 PRINT \"BAD\"
+40 PRINT \"GOOD\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "GOOD\n");
+    }
+
+    #[test]
+    fn test_if_then_else_with_line_numbers() {
+        let output = run_program(
+            "\
+10 LET X = 0
+20 IF X = 1 THEN 50 ELSE 40
+30 PRINT \"BAD\"
+40 PRINT \"GOOD\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "GOOD\n");
+    }
+
+    #[test]
+    fn test_if_then_else_conditional_math() {
+        let output = run_program_with_input(
+            "\
+10 LET X = 5
+20 INPUT \"GUESS (1-10): \"; G
+30 IF G = X THEN PRINT \"CORRECT!\" ELSE PRINT \"WRONG, IT WAS\"; X
+40 END
+",
+            "3\n",
+        )
+        .unwrap();
+        assert_eq!(output, "GUESS (1-10): ? WRONG, IT WAS 5 \n");
     }
 }
