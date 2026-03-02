@@ -31,6 +31,9 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
     - GOTO: This debugger command takes one argument, a BASIC line number, and sets the current line to the given line number, then continues to execute
     - LET: This debugger command works just like the LET statement in BASIC; it allows for setting the value of a variable.
     - PRINT: This debugger command allows the user to print just like the normal BASIC PRINT statement.
+    - LIST: print the BASIC program.
+      - Optionally it can take a BASIC line number that represents the first line to print.  So LIST 300 would start the printing at BASIC line 300.
+      - Optionally, after the first line number it can take a second line number that represents the last line to print.  So LIST 300 400 would print all basic lines from 300 to an including line 400.
     - QUIT: This debugger command exits the program and quits back to the operating system.
 
 
