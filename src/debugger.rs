@@ -26,6 +26,7 @@ enum DebugCommand {
     BreakIf(Expr),
     Let(Statement),
     Print(Vec<PrintItem>),
+    List(Option<u32>, Option<u32>),
     Quit,
     Unknown(String),
 }
@@ -67,7 +68,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
 
         writeln!(
             self.interpreter.output,
-            "BASIC Debugger. Type STEP, RUN, BREAK AT <n>, BREAK IF <expr>, GOTO <n>, LET, PRINT, or QUIT."
+            "BASIC Debugger. Type STEP, RUN, LIST, BREAK AT <n>, BREAK IF <expr>, GOTO <n>, LET, PRINT, or QUIT."
         )
         .map_err(|e| e.to_string())?;
 
@@ -149,6 +150,27 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                 DebugCommand::Print(items) => {
                     if let Err(e) = self.interpreter.execute_print(&items) {
                         let _ = writeln!(self.interpreter.output, "Error: {}", e);
+                    }
+                }
+                DebugCommand::List(start, end) => {
+                    for line in &program.lines {
+                        let ln = line.line_number;
+                        if let Some(s) = start {
+                            if ln < s {
+                                continue;
+                            }
+                        }
+                        if let Some(e) = end {
+                            if ln > e {
+                                break;
+                            }
+                        }
+                        let text = program
+                            .source_lines
+                            .get(line.source_line - 1)
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        let _ = writeln!(self.interpreter.output, "{}", text);
                     }
                 }
                 DebugCommand::Unknown(s) => {
@@ -297,6 +319,30 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         }
         if upper == "QUIT" {
             return DebugCommand::Quit;
+        }
+
+        // LIST [start [end]]
+        if upper == "LIST" {
+            return DebugCommand::List(None, None);
+        }
+        if upper.starts_with("LIST ") {
+            let rest = line.trim()[5..].trim();
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            match parts.len() {
+                1 => {
+                    if let Ok(n) = parts[0].parse::<u32>() {
+                        return DebugCommand::List(Some(n), None);
+                    }
+                    return DebugCommand::Unknown(line.to_string());
+                }
+                2 => {
+                    if let (Ok(s), Ok(e)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                        return DebugCommand::List(Some(s), Some(e));
+                    }
+                    return DebugCommand::Unknown(line.to_string());
+                }
+                _ => return DebugCommand::Unknown(line.to_string()),
+            }
         }
 
         // GOTO <number>
@@ -525,6 +571,41 @@ mod tests {
         );
         assert!(output.contains("[DBG finished]>"));
         assert!(output.contains("Program has finished."));
+    }
+
+    #[test]
+    fn test_debugger_list_all() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 LET X = 1\n30 END\n",
+            "LIST\nQUIT\n",
+        );
+        assert!(output.contains("10 PRINT \"A\""));
+        assert!(output.contains("20 LET X = 1"));
+        assert!(output.contains("30 END"));
+    }
+
+    #[test]
+    fn test_debugger_list_from_line() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 PRINT \"B\"\n30 PRINT \"C\"\n40 END\n",
+            "LIST 20\nQUIT\n",
+        );
+        assert!(!output.contains("10 PRINT \"A\"\n"));
+        assert!(output.contains("20 PRINT \"B\""));
+        assert!(output.contains("30 PRINT \"C\""));
+        assert!(output.contains("40 END"));
+    }
+
+    #[test]
+    fn test_debugger_list_range() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 PRINT \"B\"\n30 PRINT \"C\"\n40 END\n",
+            "LIST 20 30\nQUIT\n",
+        );
+        assert!(!output.contains("10 PRINT \"A\"\n"));
+        assert!(output.contains("20 PRINT \"B\""));
+        assert!(output.contains("30 PRINT \"C\""));
+        assert!(!output.contains("40 END\n"));
     }
 
     #[test]

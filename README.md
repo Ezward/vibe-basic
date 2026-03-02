@@ -119,6 +119,9 @@ The debugger provides a REPL with the following commands:
 |---------|-------------|
 | `STEP` | Execute one BASIC line |
 | `RUN` | Continue execution until a breakpoint or END |
+| `LIST` | Print the entire program listing |
+| `LIST n` | Print the program starting from line number n |
+| `LIST n m` | Print program lines from n through m (inclusive) |
 | `GOTO n` | Jump to line number n |
 | `BREAK AT n` | Set a breakpoint at line number n |
 | `BREAK IF expr` | Set a conditional breakpoint |
@@ -166,7 +169,7 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (186 tests):
+Run the full test suite (189 tests):
 
 ```sh
 cargo test
@@ -181,7 +184,7 @@ Tests are organized by module:
 | `eval` | 61 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
 | `ast` | 32 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
 | `interpreter` | 41 | Integration: control flow, loops, I/O, example programs from the spec |
-| `debugger` | 13 | Debugger: stepping, breakpoints, variable inspection and modification |
+| `debugger` | 16 | Debugger: stepping, breakpoints, LIST, variable inspection and modification |
 
 ## Formatting
 
