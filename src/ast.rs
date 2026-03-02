@@ -23,6 +23,7 @@ pub enum Statement {
     If {
         condition: Expr,
         then: Box<ThenClause>,
+        else_clause: Option<Box<ThenClause>>,
     },
     Goto {
         line_number: u32,
@@ -149,7 +150,7 @@ impl<'a> Parser<'a> {
 
     /// Returns true if the current token indicates the end of a statement (newline, EOF, or colon).
     fn at_statement_end(&self) -> bool {
-        matches!(self.peek(), Token::Newline | Token::Eof | Token::Colon)
+        matches!(self.peek(), Token::Newline | Token::Eof | Token::Colon | Token::Else)
     }
 
     /// Delegates expression parsing to the dedicated `ExprParser`, advancing past consumed tokens.
@@ -296,7 +297,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Print { items })
     }
 
-    /// Parses an IF statement: `IF condition THEN (line_number | statement)`.
+    /// Parses an IF statement: `IF condition THEN (line_number | statement) [ELSE (line_number | statement)]`.
     fn parse_if(&mut self) -> Result<Statement, String> {
         let condition = self.parse_expression()?;
         if *self.peek() != Token::Then {
@@ -311,9 +312,23 @@ impl<'a> Parser<'a> {
         } else {
             ThenClause::Statement(self.parse_statement()?)
         };
+        // Optional ELSE clause
+        let else_clause = if *self.peek() == Token::Else {
+            self.advance();
+            let clause = if let Token::Number(n) = self.peek().clone() {
+                self.advance();
+                ThenClause::LineNumber(n as u32)
+            } else {
+                ThenClause::Statement(self.parse_statement()?)
+            };
+            Some(Box::new(clause))
+        } else {
+            None
+        };
         Ok(Statement::If {
             condition,
             then: Box::new(then_clause),
+            else_clause,
         })
     }
 
@@ -521,6 +536,7 @@ mod tests {
                 then: Box::new(ThenClause::Statement(Statement::Print {
                     items: vec![PrintItem::Expression(Expr::StringLiteral("CORRECT!".to_string()))],
                 })),
+                else_clause: None,
             }
         );
     }
@@ -537,6 +553,7 @@ mod tests {
                     right: Box::new(Expr::Number(3.0)),
                 },
                 then: Box::new(ThenClause::Statement(Statement::Goto { line_number: 30 })),
+                else_clause: None,
             }
         );
     }
@@ -553,6 +570,7 @@ mod tests {
                     right: Box::new(Expr::Variable("SECRET".to_string())),
                 },
                 then: Box::new(ThenClause::LineNumber(130)),
+                else_clause: None,
             }
         );
     }
@@ -764,6 +782,62 @@ mod tests {
         assert!(matches!(stmt, Statement::If { .. }));
         if let Statement::If { then, .. } = stmt {
             assert!(matches!(*then, ThenClause::Statement(Statement::Let { .. })));
+        }
+    }
+
+    #[test]
+    fn test_parse_if_then_else_statements() {
+        let stmt = parse_single_statement("30 IF G = X THEN PRINT \"YES\" ELSE PRINT \"NO\"");
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expr::BinaryOp {
+                    op: BinOp::Equal,
+                    left: Box::new(Expr::Variable("G".to_string())),
+                    right: Box::new(Expr::Variable("X".to_string())),
+                },
+                then: Box::new(ThenClause::Statement(Statement::Print {
+                    items: vec![PrintItem::Expression(Expr::StringLiteral("YES".to_string()))],
+                })),
+                else_clause: Some(Box::new(ThenClause::Statement(Statement::Print {
+                    items: vec![PrintItem::Expression(Expr::StringLiteral("NO".to_string()))],
+                }))),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_if_then_else_line_numbers() {
+        let stmt = parse_single_statement("30 IF X > 0 THEN 100 ELSE 200");
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expr::BinaryOp {
+                    op: BinOp::Greater,
+                    left: Box::new(Expr::Variable("X".to_string())),
+                    right: Box::new(Expr::Number(0.0)),
+                },
+                then: Box::new(ThenClause::LineNumber(100)),
+                else_clause: Some(Box::new(ThenClause::LineNumber(200))),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_if_then_stmt_else_goto() {
+        let stmt = parse_single_statement("30 IF X = 1 THEN PRINT \"ONE\" ELSE GOTO 100");
+        assert!(matches!(
+            stmt,
+            Statement::If {
+                else_clause: Some(_),
+                ..
+            }
+        ));
+        if let Statement::If { else_clause, .. } = stmt {
+            assert!(matches!(
+                *else_clause.unwrap(),
+                ThenClause::Statement(Statement::Goto { line_number: 100 })
+            ));
         }
     }
 }

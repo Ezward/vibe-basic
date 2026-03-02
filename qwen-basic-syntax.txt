@@ -15,7 +15,8 @@ statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt |
 
 let_stmt        = [ "LET" ] variable "=" expression ;
 print_stmt      = "PRINT" [ expression_list ] ;
-if_stmt         = "IF" expression "THEN" ( line_number | statement ) ;
+if_stmt         = "IF" expression "THEN" ( line_number | statement )
+                  [ "ELSE" ( line_number | statement ) ] ;
 goto_stmt       = "GOTO" line_number ;
 input_stmt      = "INPUT" [ string_literal ";" ] variable ;
 for_stmt        = "FOR" variable "=" expression "TO" expression [ "STEP" expression ] ;
@@ -52,9 +53,11 @@ II. SEMANTIC EXPLANATIONS
    Action: Changes the Program Counter to the specified line number. This is 
    the primary method for creating loops or jumping over sections of code.
 
-5. IF...THEN (Conditional)
-   Action: Evaluates a logic expression. If True (non-zero), it executes the 
-   clause after THEN. If False (zero), it skips to the next line number.
+5. IF...THEN...ELSE (Conditional)
+   Action: Evaluates a logic expression. If True (non-zero), it executes the
+   clause after THEN. If False (zero) and an ELSE clause is present, it
+   executes the clause after ELSE. If False and no ELSE clause is present,
+   it skips to the next line number.
 
 6. FOR / NEXT (Iteration)
    Action: Automates a loop. FOR sets a start and end limit. NEXT increments 
@@ -88,9 +91,8 @@ EXAMPLE 2: CONDITIONAL MATH
 Code:
 10 LET X = 5
 20 INPUT "GUESS (1-10): "; G
-30 IF G = X THEN PRINT "CORRECT!"
-40 IF G <> X THEN PRINT "WRONG, IT WAS"; X
-50 END
+30 IF G = X THEN PRINT "CORRECT!" ELSE PRINT "WRONG, IT WAS"; X
+40 END
 
 Output:
 GUESS (1-10): 5
