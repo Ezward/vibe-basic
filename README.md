@@ -1,8 +1,8 @@
-# Qwen BASIC Interpreter
+# Vibe Basic Interpreter
 
 A BASIC language interpreter written in Rust, implementing a subset of classic MS-BASIC (GW-BASIC style) with line-numbered programs, arithmetic expressions, string handling, and control flow.
 
-The full language specification — EBNF grammar, semantic explanations, and example programs with expected output — is in [`qwen-basic-syntax.txt`](qwen-basic-syntax.txt).
+The full language specification — EBNF grammar, semantic explanations, and example programs with expected output — is in [`vibe-basic-syntax.txt`](vibe-basic-syntax.txt).
 
 ## Language Features
 
@@ -102,7 +102,7 @@ cargo run -- examples/hello.bas
 Or use the compiled binary directly:
 
 ```sh
-./target/release/qwen_basic myprogram.bas
+./target/release/vibe-basic myprogram.bas
 ```
 
 ### Debug Mode

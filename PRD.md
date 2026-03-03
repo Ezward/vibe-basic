@@ -1,5 +1,5 @@
 We are going to create a basic interpreter written in Rust for a subset of MS-BASIC.
-- The BASIC language syntax is specified as an eBNF grammar in this file; qwen-basic-syntax.txt.
+- The BASIC language syntax is specified as an eBNF grammar in this file; vibe-basic-syntax.txt.
   - The file also explains the semantics of the language and provides several program examples with outputs.
 
 1. First, create a parser for expressions that create and expression parse tree.

@@ -1,4 +1,4 @@
-//! Entry point for the Qwen BASIC interpreter.
+//! Entry point for the Vibe Basic interpreter.
 //!
 //! This module reads a BASIC source file, tokenizes it, parses it into an AST,
 //! and executes it through the interpreter. The pipeline is:
@@ -30,7 +30,7 @@ fn main() {
         } else if filename.is_none() {
             filename = Some(arg.as_str());
         } else {
-            eprintln!("Usage: qwen_basic [--debug] <filename.bas>");
+            eprintln!("Usage: vibe_basic [--debug] <filename.bas>");
             std::process::exit(1);
         }
     }
@@ -38,7 +38,7 @@ fn main() {
     let filename = match filename {
         Some(f) => f,
         None => {
-            eprintln!("Usage: qwen_basic [--debug] <filename.bas>");
+            eprintln!("Usage: vibe_basic [--debug] <filename.bas>");
             std::process::exit(1);
         }
     };
