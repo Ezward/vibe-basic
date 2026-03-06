@@ -670,4 +670,96 @@ mod tests {
         assert!(Value::String("HI".to_string()).is_truthy());
         assert!(!Value::String("".to_string()).is_truthy());
     }
+
+    #[test]
+    fn test_value_display_integer() {
+        assert_eq!(format!("{}", Value::Number(5.0)), "5");
+    }
+
+    #[test]
+    fn test_value_display_float() {
+        assert_eq!(format!("{}", Value::Number(3.14)), "3.14");
+    }
+
+    #[test]
+    fn test_value_display_negative_integer() {
+        assert_eq!(format!("{}", Value::Number(-7.0)), "-7");
+    }
+
+    #[test]
+    fn test_value_display_string() {
+        assert_eq!(format!("{}", Value::String("HELLO".to_string())), "HELLO");
+    }
+
+    #[test]
+    fn test_value_print_string_positive_float() {
+        assert_eq!(Value::Number(3.14).to_print_string(), " 3.14 ");
+    }
+
+    #[test]
+    fn test_value_print_string_negative_float() {
+        assert_eq!(Value::Number(-3.14).to_print_string(), "-3.14 ");
+    }
+
+    #[test]
+    fn test_value_print_string_zero() {
+        assert_eq!(Value::Number(0.0).to_print_string(), " 0 ");
+    }
+
+    #[test]
+    fn test_value_as_number_error() {
+        let val = Value::String("hello".to_string());
+        assert!(val.as_number().is_err());
+    }
+
+    #[test]
+    fn test_eval_string_not_equal() {
+        assert_eq!(eval("\"ABC\" <> \"DEF\""), Value::Number(-1.0));
+        assert_eq!(eval("\"ABC\" <> \"ABC\""), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_string_less() {
+        assert_eq!(eval("\"ABC\" < \"DEF\""), Value::Number(-1.0));
+        assert_eq!(eval("\"DEF\" < \"ABC\""), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_string_greater() {
+        assert_eq!(eval("\"DEF\" > \"ABC\""), Value::Number(-1.0));
+        assert_eq!(eval("\"ABC\" > \"DEF\""), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_string_less_equal() {
+        assert_eq!(eval("\"ABC\" <= \"DEF\""), Value::Number(-1.0));
+        assert_eq!(eval("\"ABC\" <= \"ABC\""), Value::Number(-1.0));
+        assert_eq!(eval("\"DEF\" <= \"ABC\""), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_string_greater_equal() {
+        assert_eq!(eval("\"DEF\" >= \"ABC\""), Value::Number(-1.0));
+        assert_eq!(eval("\"ABC\" >= \"ABC\""), Value::Number(-1.0));
+        assert_eq!(eval("\"ABC\" >= \"DEF\""), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_string_subtract_error() {
+        let tokens = Lexer::new("\"A\" - \"B\"").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_unary_minus_string_error() {
+        let tokens = Lexer::new("-X").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        evaluator.variables.insert("X".to_string(), Value::String("hello".to_string()));
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
 }

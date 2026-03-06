@@ -839,4 +839,65 @@ mod tests {
             ));
         }
     }
+
+    fn parse_program_err(input: &str) -> String {
+        let tokens = Lexer::new(input).tokenize();
+        let source_lines: Vec<String> = input.lines().map(String::from).collect();
+        let mut parser = Parser::new(&tokens, source_lines);
+        parser.parse_program().unwrap_err()
+    }
+
+    #[test]
+    fn test_parse_error_expected_number_for_line() {
+        let err = parse_program_err("PRINT \"HI\"");
+        assert!(err.contains("Expected number"));
+    }
+
+    #[test]
+    fn test_parse_error_unexpected_token_at_statement() {
+        let err = parse_program_err("10 +");
+        assert!(err.contains("Unexpected token at start of statement"));
+    }
+
+    #[test]
+    fn test_parse_error_missing_equal_in_let() {
+        let err = parse_program_err("10 LET X 5");
+        assert!(err.contains("Expected '=' after variable in LET"));
+    }
+
+    #[test]
+    fn test_parse_error_missing_then() {
+        let err = parse_program_err("10 IF X = 5 GOTO 20");
+        assert!(err.contains("Expected THEN"));
+    }
+
+    #[test]
+    fn test_parse_error_input_missing_semicolon() {
+        let err = parse_program_err("10 INPUT \"PROMPT\" X");
+        assert!(err.contains("Expected ';' after INPUT prompt string"));
+    }
+
+    #[test]
+    fn test_parse_error_input_bad_token() {
+        let err = parse_program_err("10 INPUT 42");
+        assert!(err.contains("Expected variable or string in INPUT"));
+    }
+
+    #[test]
+    fn test_parse_error_for_missing_equal() {
+        let err = parse_program_err("10 FOR I 1 TO 5");
+        assert!(err.contains("Expected '=' in FOR"));
+    }
+
+    #[test]
+    fn test_parse_error_for_missing_to() {
+        let err = parse_program_err("10 FOR I = 1 STEP 5");
+        assert!(err.contains("Expected TO in FOR"));
+    }
+
+    #[test]
+    fn test_parse_error_expected_identifier() {
+        let err = parse_program_err("10 LET 42 = 5");
+        assert!(err.contains("Expected identifier"));
+    }
 }

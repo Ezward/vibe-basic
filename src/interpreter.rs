@@ -740,4 +740,172 @@ mod tests {
         .unwrap();
         assert_eq!(output, "GUESS (1-10): ? WRONG, IT WAS 5 \n");
     }
+
+    #[test]
+    fn test_print_comma_tab_zones() {
+        let output = run_program("10 PRINT \"A\", \"B\"\n20 END\n").unwrap();
+        // "A" is 1 char, tab to column 14, then "B"
+        assert_eq!(output, "A             B\n");
+    }
+
+    #[test]
+    fn test_print_trailing_comma_suppresses_newline() {
+        let output = run_program("10 PRINT \"A\",\n20 PRINT \"B\"\n30 END\n").unwrap();
+        assert!(output.starts_with("A"));
+        assert!(output.contains("B\n"));
+    }
+
+    #[test]
+    fn test_if_then_line_number_truthy() {
+        let output = run_program(
+            "10 LET X = 1\n20 IF X = 1 THEN 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "GOOD\n");
+    }
+
+    #[test]
+    fn test_if_false_skips_remaining_statements_on_line() {
+        // IF false should skip remaining statements on the same line (after colon)
+        let output = run_program(
+            "10 LET X = 0\n20 IF X = 1 THEN PRINT \"YES\"\n30 PRINT \"DONE\"\n40 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_goto_invalid_line_error() {
+        let result = run_program("10 GOTO 999\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Line 999 not found"));
+    }
+
+    #[test]
+    fn test_next_without_variable_uses_stack() {
+        let output = run_program("10 FOR I = 1 TO 3\n20 PRINT I;\n30 NEXT\n40 END\n").unwrap();
+        assert_eq!(output, " 1  2  3 ");
+    }
+
+    #[test]
+    fn test_next_without_for_error() {
+        let result = run_program("10 NEXT I\n20 END\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_next_without_for_no_variable_error() {
+        let result = run_program("10 NEXT\n20 END\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_input_non_numeric_to_numeric_var() {
+        // When a non-numeric string is input for a numeric variable, it stores as string
+        let output = run_program_with_input(
+            "10 INPUT G\n20 END\n",
+            "HELLO\n",
+        )
+        .unwrap();
+        assert_eq!(output, "? ");
+    }
+
+    #[test]
+    fn test_for_loop_negative_step_skip() {
+        // Negative step where start > end should skip
+        let output = run_program(
+            "10 FOR I = 1 TO 10 STEP -1\n20 PRINT \"INSIDE\"\n30 NEXT I\n40 PRINT \"DONE\"\n50 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_program_falls_off_end() {
+        // Program with no END statement just finishes
+        let output = run_program("10 PRINT \"HI\"\n").unwrap();
+        assert_eq!(output, "HI\n");
+    }
+
+    #[test]
+    fn test_nested_for_skip() {
+        // Skip a FOR loop that has a nested FOR inside
+        let output = run_program(
+            "\
+10 FOR I = 10 TO 1
+20 FOR J = 1 TO 3
+30 PRINT J
+40 NEXT J
+50 NEXT I
+60 PRINT \"DONE\"
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_for_loop_no_matching_next_error() {
+        let result = run_program("10 FOR I = 10 TO 1\n20 PRINT \"HI\"\n30 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No matching NEXT"));
+    }
+
+    #[test]
+    fn test_apostrophe_comment_in_program() {
+        let output = run_program("10 ' THIS IS A COMMENT\n20 PRINT \"OK\"\n30 END\n").unwrap();
+        assert_eq!(output, "OK\n");
+    }
+
+    #[test]
+    fn test_runtime_error_includes_context() {
+        let result = run_program("10 PRINT UNDEFINED_VAR\n20 END\n");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("at line"));
+    }
+
+    #[test]
+    fn test_if_else_line_number_falsy() {
+        let output = run_program(
+            "10 LET X = 0\n20 IF X = 1 THEN 50 ELSE 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "GOOD\n");
+    }
+
+    #[test]
+    fn test_for_skip_with_next_no_variable() {
+        // FOR loop skipped, and matching NEXT has no variable
+        let output = run_program(
+            "10 FOR I = 10 TO 1\n20 PRINT \"INSIDE\"\n30 NEXT\n40 PRINT \"DONE\"\n50 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_for_loop_completes_without_variable_in_next() {
+        // NEXT without variable name uses stack pop to end loop
+        let output = run_program("10 FOR I = 1 TO 2\n20 PRINT I;\n30 NEXT\n40 END\n").unwrap();
+        assert_eq!(output, " 1  2 ");
+    }
+
+    #[test]
+    fn test_for_skip_nested_with_different_next_variable() {
+        // Outer FOR I skipped. Inner has NEXT J (different var), then NEXT I matches.
+        let output = run_program(
+            "\
+10 FOR I = 10 TO 1
+20 FOR J = 1 TO 3
+30 NEXT J
+40 NEXT I
+50 PRINT \"DONE\"
+60 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
 }

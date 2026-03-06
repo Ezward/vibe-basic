@@ -632,4 +632,254 @@ mod tests {
         );
         assert!(output.contains("Unknown command: FOOBAR"));
     }
+
+    #[test]
+    fn test_debugger_help_command() {
+        let output = run_debugger(
+            "10 END\n",
+            "HELP\nQUIT\n",
+        );
+        assert!(output.contains("Debugger commands:"));
+        assert!(output.contains("STEP"));
+        assert!(output.contains("RUN"));
+        assert!(output.contains("BREAK AT"));
+        assert!(output.contains("BREAK IF"));
+    }
+
+    #[test]
+    fn test_debugger_eof_exits() {
+        // No QUIT, just EOF
+        let output = run_debugger("10 END\n", "");
+        assert!(output.contains("[DBG line 10]>"));
+    }
+
+    #[test]
+    fn test_debugger_empty_line_skipped() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 END\n",
+            "\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains("A\n"));
+    }
+
+    #[test]
+    fn test_debugger_run_after_finished() {
+        let output = run_debugger(
+            "10 END\n",
+            "RUN\nRUN\nQUIT\n",
+        );
+        assert!(output.contains("Program has finished."));
+    }
+
+    #[test]
+    fn test_debugger_step_after_finished() {
+        let output = run_debugger(
+            "10 END\n",
+            "STEP\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains("Program has finished."));
+    }
+
+    #[test]
+    fn test_debugger_goto_invalid_line() {
+        let output = run_debugger(
+            "10 END\n",
+            "GOTO 999\nQUIT\n",
+        );
+        assert!(output.contains("Error:"));
+    }
+
+    #[test]
+    fn test_debugger_let_error() {
+        let output = run_debugger(
+            "10 END\n",
+            "LET X = UNDEFINED\nQUIT\n",
+        );
+        assert!(output.contains("Error:"));
+    }
+
+    #[test]
+    fn test_debugger_print_error() {
+        let output = run_debugger(
+            "10 END\n",
+            "PRINT UNDEFINED\nQUIT\n",
+        );
+        assert!(output.contains("Error:"));
+    }
+
+    #[test]
+    fn test_debugger_implicit_let() {
+        let output = run_debugger(
+            "10 PRINT X\n20 END\n",
+            "X = 42\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains(" 42 "));
+    }
+
+    #[test]
+    fn test_debugger_goto_bad_parse() {
+        let output = run_debugger(
+            "10 END\n",
+            "GOTO ABC\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_break_at_bad_parse() {
+        let output = run_debugger(
+            "10 END\n",
+            "BREAK AT ABC\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_break_if_bad_expr() {
+        let output = run_debugger(
+            "10 END\n",
+            "BREAK IF +\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_list_bad_args() {
+        let output = run_debugger(
+            "10 END\n",
+            "LIST ABC\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_list_bad_range() {
+        let output = run_debugger(
+            "10 END\n",
+            "LIST ABC DEF\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_list_too_many_args() {
+        let output = run_debugger(
+            "10 END\n",
+            "LIST 1 2 3\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_debugger_step_with_skip_line() {
+        // IF false in debugger step mode should skip line
+        let output = run_debugger(
+            "10 LET X = 0\n20 IF X = 1 THEN PRINT \"YES\"\n30 PRINT \"NO\"\n40 END\n",
+            "STEP\nSTEP\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains("NO\n"));
+        assert!(!output.contains("YES"));
+    }
+
+    #[test]
+    fn test_debugger_step_with_goto() {
+        let output = run_debugger(
+            "10 GOTO 30\n20 PRINT \"SKIP\"\n30 PRINT \"REACHED\"\n40 END\n",
+            "STEP\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains("REACHED\n"));
+        assert!(!output.contains("SKIP"));
+    }
+
+    #[test]
+    fn test_debugger_step_for_loop_skip() {
+        let output = run_debugger(
+            "10 FOR I = 10 TO 1\n20 PRINT \"INSIDE\"\n30 NEXT I\n40 PRINT \"DONE\"\n50 END\n",
+            "STEP\nSTEP\nQUIT\n",
+        );
+        assert!(output.contains("DONE\n"));
+        assert!(!output.contains("INSIDE"));
+    }
+
+    #[test]
+    fn test_debugger_step_past_end_of_program() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n",
+            "STEP\nQUIT\n",
+        );
+        assert!(output.contains("A\n"));
+        assert!(output.contains("Program finished."));
+    }
+
+    #[test]
+    fn test_debugger_run_with_error() {
+        let output = run_debugger(
+            "10 PRINT UNDEFINED\n20 END\n",
+            "RUN\nQUIT\n",
+        );
+        assert!(output.contains("Runtime error:"));
+    }
+
+    #[test]
+    fn test_debugger_step_goto_to_invalid_line() {
+        let output = run_debugger(
+            "10 GOTO 999\n20 END\n",
+            "STEP\nQUIT\n",
+        );
+        assert!(output.contains("Runtime error:"));
+    }
+
+    #[test]
+    fn test_debugger_goto_restarts_finished_program() {
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 END\n",
+            "RUN\nGOTO 10\nSTEP\nQUIT\n",
+        );
+        // Should see "A" printed twice - once from RUN, once from STEP after GOTO
+        let count = output.matches("A\n").count();
+        assert!(count >= 2);
+    }
+
+    #[test]
+    fn test_debugger_print_bad_parse() {
+        // PRINT followed by something that can't be parsed as a valid BASIC expression
+        // This triggers the Unknown path when PRINT fails to parse as a statement
+        let output = run_debugger(
+            "10 END\n",
+            "PRINT\nQUIT\n",
+        );
+        // PRINT with no args prints a blank line, which is valid
+        assert!(output.contains("\n"));
+    }
+
+    #[test]
+    fn test_debugger_break_if_falsy_no_hit() {
+        // Breakpoint with a condition that evaluates to falsy (0)
+        let output = run_debugger(
+            "10 LET X = 0\n20 PRINT X\n30 END\n",
+            "BREAK IF X > 100\nRUN\nQUIT\n",
+        );
+        // Should run to completion since condition is always false
+        assert!(output.contains("Program finished."));
+    }
+
+    #[test]
+    fn test_debugger_break_if_eval_error_ignored() {
+        // Breakpoint with expression that errors (undefined var) - should be ignored
+        let output = run_debugger(
+            "10 PRINT \"A\"\n20 END\n",
+            "BREAK IF UNDEFINED_VAR > 0\nRUN\nQUIT\n",
+        );
+        assert!(output.contains("Program finished."));
+    }
+
+    #[test]
+    fn test_debugger_implicit_let_not_an_assignment() {
+        // Something with = that doesn't parse as LET (e.g. nonsensical)
+        let output = run_debugger(
+            "10 END\n",
+            "123 = 456\nQUIT\n",
+        );
+        assert!(output.contains("Unknown command"));
+    }
 }

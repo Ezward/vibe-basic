@@ -43,9 +43,11 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
 Generally:
 
 - Use the Rust language to implement the code.
-- Always run `cargo fmt` on the code to ensure standard formatting.  Use a 120 character line length.
-- Always include unit tests for happy paths and edge cases.  Unit tests should use randomized data where possible to avoid tests that only pass with a fixed data set.
 - Always make sure the program will compile without errors or warnings.  Fix any errors or warnings.
-- Always make sure to lint the code with `cargo clippy` and fix any issues.
+- Always include unit tests for happy paths and edge cases.  Unit tests should use randomized data where possible to avoid tests that only pass with a fixed data set.
+- Use `cargo-llvm-cov` to determine test coverage.  Add missing unit tests for happy path and edge cases to achieve 100% test coverage.
 - Always make sure the unit tests compile without errors or warnings and the tests run without failures.   Fix any errors or warnings or test failures.
+- Always make sure to lint the code with `cargo clippy` and fix any issues.
+- Always run `cargo fmt` on the code to ensure standard formatting.  Use a 120 character line length.
+
 - Always document functions.

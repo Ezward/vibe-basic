@@ -543,4 +543,83 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_parse_unexpected_token_error() {
+        let tokens = Lexer::new("+").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        assert!(parser.parse_expression().is_err());
+    }
+
+    #[test]
+    fn test_parse_missing_right_paren() {
+        let tokens = Lexer::new("(1 + 2").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        assert!(parser.parse_expression().is_err());
+    }
+
+    #[test]
+    fn test_parse_function_missing_right_paren() {
+        let tokens = Lexer::new("INT(1").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        assert!(parser.parse_expression().is_err());
+    }
+
+    #[test]
+    fn test_parse_function_no_args() {
+        let tokens = Lexer::new("INT()").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        assert_eq!(
+            expr,
+            Expr::FunctionCall {
+                name: "INT".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_less() {
+        assert_eq!(
+            parse_expr("A < B"),
+            Expr::BinaryOp {
+                op: BinOp::Less,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_greater() {
+        assert_eq!(
+            parse_expr("A > B"),
+            Expr::BinaryOp {
+                op: BinOp::Greater,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_greater_equal() {
+        assert_eq!(
+            parse_expr("A >= B"),
+            Expr::BinaryOp {
+                op: BinOp::GreaterEqual,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_double_negation() {
+        assert_eq!(
+            parse_expr("--5"),
+            Expr::UnaryMinus(Box::new(Expr::UnaryMinus(Box::new(Expr::Number(5.0)))))
+        );
+    }
 }

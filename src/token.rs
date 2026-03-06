@@ -450,4 +450,61 @@ mod tests {
             vec![Token::Newline, Token::Newline, Token::Number(10.0), Token::End, Token::Newline, Token::Newline, Token::Eof]
         );
     }
+
+    #[test]
+    fn test_tokenize_apostrophe_comment() {
+        let tokens = Lexer::new("' THIS IS A COMMENT").tokenize();
+        assert_eq!(tokens, vec![Token::Rem("THIS IS A COMMENT".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_apostrophe_comment_with_newline() {
+        let tokens = Lexer::new("' COMMENT\n10 END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Rem("COMMENT".to_string()),
+                Token::Newline,
+                Token::Number(10.0),
+                Token::End,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_unknown_character() {
+        let tokens = Lexer::new("@").tokenize();
+        assert_eq!(tokens, vec![Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_identifier_with_underscore() {
+        let tokens = Lexer::new("MY_VAR").tokenize();
+        assert_eq!(tokens, vec![Token::Identifier("MY_VAR".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_number_with_trailing_dot() {
+        let tokens = Lexer::new("42.").tokenize();
+        assert_eq!(tokens, vec![Token::Number(42.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_unterminated_string() {
+        let tokens = Lexer::new("\"HELLO").tokenize();
+        assert_eq!(tokens, vec![Token::StringLiteral("HELLO".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_empty_string() {
+        let tokens = Lexer::new("\"\"").tokenize();
+        assert_eq!(tokens, vec![Token::StringLiteral("".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_tabs_and_carriage_returns() {
+        let tokens = Lexer::new("\t\r10").tokenize();
+        assert_eq!(tokens, vec![Token::Number(10.0), Token::Eof]);
+    }
 }
