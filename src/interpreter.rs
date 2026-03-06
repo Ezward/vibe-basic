@@ -126,7 +126,11 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 self.execute_print(items)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::If { condition, then, else_clause } => {
+            Statement::If {
+                condition,
+                then,
+                else_clause,
+            } => {
                 let val = self.evaluator.eval_expr(condition)?;
                 if val.is_truthy() {
                     match then.as_ref() {
@@ -757,20 +761,15 @@ mod tests {
 
     #[test]
     fn test_if_then_line_number_truthy() {
-        let output = run_program(
-            "10 LET X = 1\n20 IF X = 1 THEN 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n",
-        )
-        .unwrap();
+        let output =
+            run_program("10 LET X = 1\n20 IF X = 1 THEN 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n").unwrap();
         assert_eq!(output, "GOOD\n");
     }
 
     #[test]
     fn test_if_false_skips_remaining_statements_on_line() {
         // IF false should skip remaining statements on the same line (after colon)
-        let output = run_program(
-            "10 LET X = 0\n20 IF X = 1 THEN PRINT \"YES\"\n30 PRINT \"DONE\"\n40 END\n",
-        )
-        .unwrap();
+        let output = run_program("10 LET X = 0\n20 IF X = 1 THEN PRINT \"YES\"\n30 PRINT \"DONE\"\n40 END\n").unwrap();
         assert_eq!(output, "DONE\n");
     }
 
@@ -802,21 +801,16 @@ mod tests {
     #[test]
     fn test_input_non_numeric_to_numeric_var() {
         // When a non-numeric string is input for a numeric variable, it stores as string
-        let output = run_program_with_input(
-            "10 INPUT G\n20 END\n",
-            "HELLO\n",
-        )
-        .unwrap();
+        let output = run_program_with_input("10 INPUT G\n20 END\n", "HELLO\n").unwrap();
         assert_eq!(output, "? ");
     }
 
     #[test]
     fn test_for_loop_negative_step_skip() {
         // Negative step where start > end should skip
-        let output = run_program(
-            "10 FOR I = 1 TO 10 STEP -1\n20 PRINT \"INSIDE\"\n30 NEXT I\n40 PRINT \"DONE\"\n50 END\n",
-        )
-        .unwrap();
+        let output =
+            run_program("10 FOR I = 1 TO 10 STEP -1\n20 PRINT \"INSIDE\"\n30 NEXT I\n40 PRINT \"DONE\"\n50 END\n")
+                .unwrap();
         assert_eq!(output, "DONE\n");
     }
 
@@ -868,20 +862,17 @@ mod tests {
 
     #[test]
     fn test_if_else_line_number_falsy() {
-        let output = run_program(
-            "10 LET X = 0\n20 IF X = 1 THEN 50 ELSE 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n",
-        )
-        .unwrap();
+        let output =
+            run_program("10 LET X = 0\n20 IF X = 1 THEN 50 ELSE 40\n30 PRINT \"BAD\"\n40 PRINT \"GOOD\"\n50 END\n")
+                .unwrap();
         assert_eq!(output, "GOOD\n");
     }
 
     #[test]
     fn test_for_skip_with_next_no_variable() {
         // FOR loop skipped, and matching NEXT has no variable
-        let output = run_program(
-            "10 FOR I = 10 TO 1\n20 PRINT \"INSIDE\"\n30 NEXT\n40 PRINT \"DONE\"\n50 END\n",
-        )
-        .unwrap();
+        let output =
+            run_program("10 FOR I = 10 TO 1\n20 PRINT \"INSIDE\"\n30 NEXT\n40 PRINT \"DONE\"\n50 END\n").unwrap();
         assert_eq!(output, "DONE\n");
     }
 
@@ -907,5 +898,132 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_if_with_and() {
+        let output = run_program(
+            "\
+10 LET X = 5
+20 LET Y = 3
+30 IF X > 0 AND Y > 0 THEN PRINT \"BOTH POSITIVE\"
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "BOTH POSITIVE\n");
+    }
+
+    #[test]
+    fn test_if_with_and_false() {
+        let output = run_program(
+            "\
+10 LET X = 5
+20 LET Y = -1
+30 IF X > 0 AND Y > 0 THEN PRINT \"BOTH POSITIVE\"
+40 PRINT \"DONE\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_if_with_or() {
+        let output = run_program(
+            "\
+10 LET X = -1
+20 LET Y = 5
+30 IF X > 0 OR Y > 0 THEN PRINT \"AT LEAST ONE POSITIVE\"
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "AT LEAST ONE POSITIVE\n");
+    }
+
+    #[test]
+    fn test_if_with_or_both_false() {
+        let output = run_program(
+            "\
+10 LET X = -1
+20 LET Y = -2
+30 IF X > 0 OR Y > 0 THEN PRINT \"POSITIVE\"
+40 PRINT \"DONE\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_if_with_not() {
+        let output = run_program(
+            "\
+10 LET X = 0
+20 IF NOT X = 1 THEN PRINT \"NOT ONE\"
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "NOT ONE\n");
+    }
+
+    #[test]
+    fn test_if_with_xor() {
+        let output = run_program(
+            "\
+10 LET A = 1
+20 LET B = 0
+30 IF (A = 1) XOR (B = 1) THEN PRINT \"EXACTLY ONE\"
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "EXACTLY ONE\n");
+    }
+
+    #[test]
+    fn test_if_with_xor_both_true() {
+        let output = run_program(
+            "\
+10 LET A = 1
+20 LET B = 1
+30 IF (A = 1) XOR (B = 1) THEN PRINT \"EXACTLY ONE\"
+40 PRINT \"DONE\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    #[test]
+    fn test_complex_logical_in_loop() {
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 10
+20 IF I > 3 AND I < 7 THEN PRINT I;
+30 NEXT I
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 4  5  6 ");
+    }
+
+    #[test]
+    fn test_not_in_if_else() {
+        let output = run_program(
+            "\
+10 LET X = 5
+20 IF NOT X = 5 THEN PRINT \"NOT FIVE\" ELSE PRINT \"FIVE\"
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "FIVE\n");
     }
 }

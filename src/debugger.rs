@@ -62,8 +62,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
     /// Runs the interactive debugger REPL for the given program.
     pub fn run_repl(&mut self, program: &Program) -> Result<(), String> {
         if program.lines.is_empty() {
-            writeln!(self.interpreter.output, "Program is empty.")
-                .map_err(|e| e.to_string())?;
+            writeln!(self.interpreter.output, "Program is empty.").map_err(|e| e.to_string())?;
             return Ok(());
         }
 
@@ -76,12 +75,10 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         loop {
             // Print prompt
             if self.finished {
-                write!(self.interpreter.output, "[DBG finished]> ")
-                    .map_err(|e| e.to_string())?;
+                write!(self.interpreter.output, "[DBG finished]> ").map_err(|e| e.to_string())?;
             } else {
                 let line_num = program.lines[self.line_idx].line_number;
-                write!(self.interpreter.output, "[DBG line {}]> ", line_num)
-                    .map_err(|e| e.to_string())?;
+                write!(self.interpreter.output, "[DBG line {}]> ", line_num).map_err(|e| e.to_string())?;
             }
             self.interpreter.output.flush().map_err(|e| e.to_string())?;
 
@@ -106,38 +103,38 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                 DebugCommand::Quit => break,
                 DebugCommand::Step => {
                     if self.finished {
-                        writeln!(self.interpreter.output, "Program has finished. Use GOTO to restart from a line.")
-                            .map_err(|e| e.to_string())?;
+                        writeln!(
+                            self.interpreter.output,
+                            "Program has finished. Use GOTO to restart from a line."
+                        )
+                        .map_err(|e| e.to_string())?;
                     } else {
                         self.execute_one_line(program);
                     }
                 }
                 DebugCommand::Run => {
                     if self.finished {
-                        writeln!(self.interpreter.output, "Program has finished. Use GOTO to restart from a line.")
-                            .map_err(|e| e.to_string())?;
+                        writeln!(
+                            self.interpreter.output,
+                            "Program has finished. Use GOTO to restart from a line."
+                        )
+                        .map_err(|e| e.to_string())?;
                     } else {
                         self.execute_until_break(program);
                     }
                 }
-                DebugCommand::Goto(line_num) => {
-                    match self.interpreter.find_line_index(program, line_num) {
-                        Ok(idx) => {
-                            self.line_idx = idx;
-                            self.finished = false;
-                        }
-                        Err(e) => {
-                            let _ = writeln!(self.interpreter.output, "Error: {}", e);
-                        }
+                DebugCommand::Goto(line_num) => match self.interpreter.find_line_index(program, line_num) {
+                    Ok(idx) => {
+                        self.line_idx = idx;
+                        self.finished = false;
                     }
-                }
+                    Err(e) => {
+                        let _ = writeln!(self.interpreter.output, "Error: {}", e);
+                    }
+                },
                 DebugCommand::BreakAt(line_num) => {
                     self.breakpoints.push(Breakpoint::AtLine(line_num));
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "Breakpoint set at line {}",
-                        line_num
-                    );
+                    let _ = writeln!(self.interpreter.output, "Breakpoint set at line {}", line_num);
                 }
                 DebugCommand::BreakIf(expr) => {
                     self.breakpoints.push(Breakpoint::IfExpr(expr));
@@ -176,15 +173,36 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                 }
                 DebugCommand::Help => {
                     let _ = writeln!(self.interpreter.output, "Debugger commands:");
-                    let _ = writeln!(self.interpreter.output, "  STEP              Execute the current line and advance");
-                    let _ = writeln!(self.interpreter.output, "  RUN               Run until a breakpoint or program end");
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  STEP              Execute the current line and advance"
+                    );
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  RUN               Run until a breakpoint or program end"
+                    );
                     let _ = writeln!(self.interpreter.output, "  LIST              List all program lines");
-                    let _ = writeln!(self.interpreter.output, "  LIST <start>      List from line <start> onward");
-                    let _ = writeln!(self.interpreter.output, "  LIST <start> <end>  List lines from <start> to <end>");
-                    let _ = writeln!(self.interpreter.output, "  BREAK AT <line>   Set a breakpoint at a line number");
-                    let _ = writeln!(self.interpreter.output, "  BREAK IF <expr>   Set a conditional breakpoint");
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  LIST <start>      List from line <start> onward"
+                    );
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  LIST <start> <end>  List lines from <start> to <end>"
+                    );
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  BREAK AT <line>   Set a breakpoint at a line number"
+                    );
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  BREAK IF <expr>   Set a conditional breakpoint"
+                    );
                     let _ = writeln!(self.interpreter.output, "  GOTO <line>       Jump to a line number");
-                    let _ = writeln!(self.interpreter.output, "  PRINT <expr>      Evaluate and print an expression");
+                    let _ = writeln!(
+                        self.interpreter.output,
+                        "  PRINT <expr>      Evaluate and print an expression"
+                    );
                     let _ = writeln!(self.interpreter.output, "  LET <var> = <val> Set a variable's value");
                     let _ = writeln!(self.interpreter.output, "  QUIT              Exit the debugger");
                     let _ = writeln!(self.interpreter.output, "  HELP              Show this help message");
@@ -222,20 +240,16 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         let mut next_line_idx = self.line_idx + 1;
 
         for stmt in &line.statements {
-            let result = self
-                .interpreter
-                .execute_statement(stmt, self.line_idx, program);
+            let result = self.interpreter.execute_statement(stmt, self.line_idx, program);
             match result {
                 Ok(StmtResult::Continue) => {}
-                Ok(StmtResult::Goto(target_line)) => {
-                    match self.interpreter.find_line_index(program, target_line) {
-                        Ok(idx) => {
-                            next_line_idx = idx;
-                            break;
-                        }
-                        Err(e) => return ExecutionOutcome::Error(e),
+                Ok(StmtResult::Goto(target_line)) => match self.interpreter.find_line_index(program, target_line) {
+                    Ok(idx) => {
+                        next_line_idx = idx;
+                        break;
                     }
-                }
+                    Err(e) => return ExecutionOutcome::Error(e),
+                },
                 Ok(StmtResult::End) => {
                     return ExecutionOutcome::Finished;
                 }
@@ -270,11 +284,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             if !first && self.line_idx < program.lines.len() {
                 let line_num = program.lines[self.line_idx].line_number;
                 if self.check_breakpoints(line_num) {
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "Breakpoint hit at line {}",
-                        line_num
-                    );
+                    let _ = writeln!(self.interpreter.output, "Breakpoint hit at line {}", line_num);
                     return;
                 }
             }
@@ -464,20 +474,14 @@ mod tests {
 
     #[test]
     fn test_debugger_step_executes_one_line() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n",
-            "STEP\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n", "STEP\nSTEP\nQUIT\n");
         assert!(output.contains("A\n"));
         assert!(output.contains("B\n"));
     }
 
     #[test]
     fn test_debugger_run_to_completion() {
-        let output = run_debugger(
-            "10 PRINT \"HELLO\"\n20 END\n",
-            "RUN\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"HELLO\"\n20 END\n", "RUN\nQUIT\n");
         assert!(output.contains("HELLO\n"));
         assert!(output.contains("Program finished."));
     }
@@ -496,28 +500,19 @@ mod tests {
 
     #[test]
     fn test_debugger_print_variable() {
-        let output = run_debugger(
-            "10 LET X = 42\n20 END\n",
-            "STEP\nPRINT X\nQUIT\n",
-        );
+        let output = run_debugger("10 LET X = 42\n20 END\n", "STEP\nPRINT X\nQUIT\n");
         assert!(output.contains(" 42 "));
     }
 
     #[test]
     fn test_debugger_let_modifies_variable() {
-        let output = run_debugger(
-            "10 LET X = 1\n20 PRINT X\n30 END\n",
-            "STEP\nLET X = 99\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 LET X = 1\n20 PRINT X\n30 END\n", "STEP\nLET X = 99\nSTEP\nQUIT\n");
         assert!(output.contains(" 99 "));
     }
 
     #[test]
     fn test_debugger_goto_jumps() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n",
-            "GOTO 20\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n", "GOTO 20\nSTEP\nQUIT\n");
         // Should print B (skipped A)
         assert!(output.contains("B\n"));
         // Should NOT contain A printed by execution
@@ -537,10 +532,7 @@ mod tests {
 
     #[test]
     fn test_debugger_error_stays_alive() {
-        let output = run_debugger(
-            "10 PRINT X\n20 END\n",
-            "STEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT X\n20 END\n", "STEP\nQUIT\n");
         assert!(output.contains("Runtime error:"));
         // Debugger should still be alive (we see the next prompt)
         assert!(output.contains("[DBG line 10]>"));
@@ -565,10 +557,7 @@ mod tests {
 
     #[test]
     fn test_debugger_quit() {
-        let output = run_debugger(
-            "10 PRINT \"HELLO\"\n20 END\n",
-            "QUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"HELLO\"\n20 END\n", "QUIT\n");
         // Should see the initial prompt but not execute any BASIC code
         assert!(!output.contains("HELLO\n"));
     }
@@ -581,20 +570,14 @@ mod tests {
 
     #[test]
     fn test_debugger_finished_state() {
-        let output = run_debugger(
-            "10 PRINT \"DONE\"\n20 END\n",
-            "RUN\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"DONE\"\n20 END\n", "RUN\nSTEP\nQUIT\n");
         assert!(output.contains("[DBG finished]>"));
         assert!(output.contains("Program has finished."));
     }
 
     #[test]
     fn test_debugger_list_all() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 LET X = 1\n30 END\n",
-            "LIST\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 LET X = 1\n30 END\n", "LIST\nQUIT\n");
         assert!(output.contains("10 PRINT \"A\""));
         assert!(output.contains("20 LET X = 1"));
         assert!(output.contains("30 END"));
@@ -626,19 +609,13 @@ mod tests {
 
     #[test]
     fn test_debugger_unknown_command() {
-        let output = run_debugger(
-            "10 END\n",
-            "FOOBAR\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "FOOBAR\nQUIT\n");
         assert!(output.contains("Unknown command: FOOBAR"));
     }
 
     #[test]
     fn test_debugger_help_command() {
-        let output = run_debugger(
-            "10 END\n",
-            "HELP\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "HELP\nQUIT\n");
         assert!(output.contains("Debugger commands:"));
         assert!(output.contains("STEP"));
         assert!(output.contains("RUN"));
@@ -655,118 +632,79 @@ mod tests {
 
     #[test]
     fn test_debugger_empty_line_skipped() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 END\n",
-            "\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 END\n", "\nSTEP\nQUIT\n");
         assert!(output.contains("A\n"));
     }
 
     #[test]
     fn test_debugger_run_after_finished() {
-        let output = run_debugger(
-            "10 END\n",
-            "RUN\nRUN\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "RUN\nRUN\nQUIT\n");
         assert!(output.contains("Program has finished."));
     }
 
     #[test]
     fn test_debugger_step_after_finished() {
-        let output = run_debugger(
-            "10 END\n",
-            "STEP\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "STEP\nSTEP\nQUIT\n");
         assert!(output.contains("Program has finished."));
     }
 
     #[test]
     fn test_debugger_goto_invalid_line() {
-        let output = run_debugger(
-            "10 END\n",
-            "GOTO 999\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "GOTO 999\nQUIT\n");
         assert!(output.contains("Error:"));
     }
 
     #[test]
     fn test_debugger_let_error() {
-        let output = run_debugger(
-            "10 END\n",
-            "LET X = UNDEFINED\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "LET X = UNDEFINED\nQUIT\n");
         assert!(output.contains("Error:"));
     }
 
     #[test]
     fn test_debugger_print_error() {
-        let output = run_debugger(
-            "10 END\n",
-            "PRINT UNDEFINED\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "PRINT UNDEFINED\nQUIT\n");
         assert!(output.contains("Error:"));
     }
 
     #[test]
     fn test_debugger_implicit_let() {
-        let output = run_debugger(
-            "10 PRINT X\n20 END\n",
-            "X = 42\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT X\n20 END\n", "X = 42\nSTEP\nQUIT\n");
         assert!(output.contains(" 42 "));
     }
 
     #[test]
     fn test_debugger_goto_bad_parse() {
-        let output = run_debugger(
-            "10 END\n",
-            "GOTO ABC\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "GOTO ABC\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
     #[test]
     fn test_debugger_break_at_bad_parse() {
-        let output = run_debugger(
-            "10 END\n",
-            "BREAK AT ABC\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "BREAK AT ABC\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
     #[test]
     fn test_debugger_break_if_bad_expr() {
-        let output = run_debugger(
-            "10 END\n",
-            "BREAK IF +\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "BREAK IF +\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
     #[test]
     fn test_debugger_list_bad_args() {
-        let output = run_debugger(
-            "10 END\n",
-            "LIST ABC\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "LIST ABC\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
     #[test]
     fn test_debugger_list_bad_range() {
-        let output = run_debugger(
-            "10 END\n",
-            "LIST ABC DEF\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "LIST ABC DEF\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
     #[test]
     fn test_debugger_list_too_many_args() {
-        let output = run_debugger(
-            "10 END\n",
-            "LIST 1 2 3\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "LIST 1 2 3\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 
@@ -803,38 +741,26 @@ mod tests {
 
     #[test]
     fn test_debugger_step_past_end_of_program() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n",
-            "STEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n", "STEP\nQUIT\n");
         assert!(output.contains("A\n"));
         assert!(output.contains("Program finished."));
     }
 
     #[test]
     fn test_debugger_run_with_error() {
-        let output = run_debugger(
-            "10 PRINT UNDEFINED\n20 END\n",
-            "RUN\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT UNDEFINED\n20 END\n", "RUN\nQUIT\n");
         assert!(output.contains("Runtime error:"));
     }
 
     #[test]
     fn test_debugger_step_goto_to_invalid_line() {
-        let output = run_debugger(
-            "10 GOTO 999\n20 END\n",
-            "STEP\nQUIT\n",
-        );
+        let output = run_debugger("10 GOTO 999\n20 END\n", "STEP\nQUIT\n");
         assert!(output.contains("Runtime error:"));
     }
 
     #[test]
     fn test_debugger_goto_restarts_finished_program() {
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 END\n",
-            "RUN\nGOTO 10\nSTEP\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 END\n", "RUN\nGOTO 10\nSTEP\nQUIT\n");
         // Should see "A" printed twice - once from RUN, once from STEP after GOTO
         let count = output.matches("A\n").count();
         assert!(count >= 2);
@@ -844,10 +770,7 @@ mod tests {
     fn test_debugger_print_bad_parse() {
         // PRINT followed by something that can't be parsed as a valid BASIC expression
         // This triggers the Unknown path when PRINT fails to parse as a statement
-        let output = run_debugger(
-            "10 END\n",
-            "PRINT\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "PRINT\nQUIT\n");
         // PRINT with no args prints a blank line, which is valid
         assert!(output.contains("\n"));
     }
@@ -855,10 +778,7 @@ mod tests {
     #[test]
     fn test_debugger_break_if_falsy_no_hit() {
         // Breakpoint with a condition that evaluates to falsy (0)
-        let output = run_debugger(
-            "10 LET X = 0\n20 PRINT X\n30 END\n",
-            "BREAK IF X > 100\nRUN\nQUIT\n",
-        );
+        let output = run_debugger("10 LET X = 0\n20 PRINT X\n30 END\n", "BREAK IF X > 100\nRUN\nQUIT\n");
         // Should run to completion since condition is always false
         assert!(output.contains("Program finished."));
     }
@@ -866,20 +786,14 @@ mod tests {
     #[test]
     fn test_debugger_break_if_eval_error_ignored() {
         // Breakpoint with expression that errors (undefined var) - should be ignored
-        let output = run_debugger(
-            "10 PRINT \"A\"\n20 END\n",
-            "BREAK IF UNDEFINED_VAR > 0\nRUN\nQUIT\n",
-        );
+        let output = run_debugger("10 PRINT \"A\"\n20 END\n", "BREAK IF UNDEFINED_VAR > 0\nRUN\nQUIT\n");
         assert!(output.contains("Program finished."));
     }
 
     #[test]
     fn test_debugger_implicit_let_not_an_assignment() {
         // Something with = that doesn't parse as LET (e.g. nonsensical)
-        let output = run_debugger(
-            "10 END\n",
-            "123 = 456\nQUIT\n",
-        );
+        let output = run_debugger("10 END\n", "123 = 456\nQUIT\n");
         assert!(output.contains("Unknown command"));
     }
 }

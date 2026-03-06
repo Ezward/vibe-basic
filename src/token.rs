@@ -28,6 +28,11 @@ pub enum Token {
     Next,
     Rem(String),
     End,
+    // Logical operators
+    And,
+    Or,
+    Xor,
+    Not,
     // Operators
     Plus,
     Minus,
@@ -168,6 +173,10 @@ impl Lexer {
             "STEP" => Token::Step,
             "NEXT" => Token::Next,
             "END" => Token::End,
+            "AND" => Token::And,
+            "OR" => Token::Or,
+            "XOR" => Token::Xor,
+            "NOT" => Token::Not,
             "REM" => {
                 // Consume rest of line as remark
                 let mut comment = String::new();
@@ -362,6 +371,36 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_logical_keywords() {
+        let tokens = Lexer::new("AND OR XOR NOT").tokenize();
+        assert_eq!(tokens, vec![Token::And, Token::Or, Token::Xor, Token::Not, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_logical_keywords_case_insensitive() {
+        let tokens = Lexer::new("and or xor not").tokenize();
+        assert_eq!(tokens, vec![Token::And, Token::Or, Token::Xor, Token::Not, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_logical_in_expression() {
+        let tokens = Lexer::new("X > 0 AND Y < 10").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("X".to_string()),
+                Token::Greater,
+                Token::Number(0.0),
+                Token::And,
+                Token::Identifier("Y".to_string()),
+                Token::Less,
+                Token::Number(10.0),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
     fn test_tokenize_case_insensitive() {
         let tokens = Lexer::new("let print if").tokenize();
         assert_eq!(tokens, vec![Token::Let, Token::Print, Token::If, Token::Eof]);
@@ -447,7 +486,15 @@ mod tests {
         let tokens = Lexer::new("\n\n10 END\n\n").tokenize();
         assert_eq!(
             tokens,
-            vec![Token::Newline, Token::Newline, Token::Number(10.0), Token::End, Token::Newline, Token::Newline, Token::Eof]
+            vec![
+                Token::Newline,
+                Token::Newline,
+                Token::Number(10.0),
+                Token::End,
+                Token::Newline,
+                Token::Newline,
+                Token::Eof
+            ]
         );
     }
 

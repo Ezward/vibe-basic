@@ -2,9 +2,10 @@
 //!
 //! This module defines the expression AST nodes (`Expr`, `BinOp`) and provides
 //! a recursive descent `ExprParser` that handles operator precedence. The
-//! precedence levels from lowest to highest are: comparison, addition/subtraction,
-//! multiplication/division, exponentiation, unary minus, and primary factors
-//! (literals, variables, parenthesized expressions, function calls).
+//! precedence levels from lowest to highest are: OR, XOR, AND, NOT (unary),
+//! comparison, addition/subtraction, multiplication/division, exponentiation,
+//! unary minus, and primary factors (literals, variables, parenthesized
+//! expressions, function calls).
 
 use crate::token::Token;
 
@@ -20,6 +21,7 @@ pub enum Expr {
         right: Box<Expr>,
     },
     UnaryMinus(Box<Expr>),
+    UnaryNot(Box<Expr>),
     FunctionCall {
         name: String,
         args: Vec<Expr>,
@@ -40,6 +42,9 @@ pub enum BinOp {
     Greater,
     LessEqual,
     GreaterEqual,
+    And,
+    Or,
+    Xor,
 }
 
 /// Recursive descent expression parser
@@ -72,8 +77,63 @@ impl<'a> ExprParser<'a> {
         tok
     }
 
-    /// Parse a full expression (lowest precedence: comparisons)
+    /// Parse a full expression (lowest precedence: OR)
     pub fn parse_expression(&mut self) -> Result<Expr, String> {
+        self.parse_or()
+    }
+
+    /// or_expr = xor_expr { "OR" xor_expr }
+    fn parse_or(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_xor()?;
+        while *self.peek() == Token::Or {
+            self.advance();
+            let right = self.parse_xor()?;
+            left = Expr::BinaryOp {
+                op: BinOp::Or,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    /// xor_expr = and_expr { "XOR" and_expr }
+    fn parse_xor(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_and()?;
+        while *self.peek() == Token::Xor {
+            self.advance();
+            let right = self.parse_and()?;
+            left = Expr::BinaryOp {
+                op: BinOp::Xor,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    /// and_expr = not_expr { "AND" not_expr }
+    fn parse_and(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_not()?;
+        while *self.peek() == Token::And {
+            self.advance();
+            let right = self.parse_not()?;
+            left = Expr::BinaryOp {
+                op: BinOp::And,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    /// not_expr = "NOT" not_expr | comparison
+    fn parse_not(&mut self) -> Result<Expr, String> {
+        if *self.peek() == Token::Not {
+            self.advance();
+            let expr = self.parse_not()?;
+            return Ok(Expr::UnaryNot(Box::new(expr)));
+        }
         self.parse_comparison()
     }
 
@@ -620,6 +680,165 @@ mod tests {
         assert_eq!(
             parse_expr("--5"),
             Expr::UnaryMinus(Box::new(Expr::UnaryMinus(Box::new(Expr::Number(5.0)))))
+        );
+    }
+
+    #[test]
+    fn test_parse_and() {
+        assert_eq!(
+            parse_expr("A AND B"),
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_or() {
+        assert_eq!(
+            parse_expr("A OR B"),
+            Expr::BinaryOp {
+                op: BinOp::Or,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_xor() {
+        assert_eq!(
+            parse_expr("A XOR B"),
+            Expr::BinaryOp {
+                op: BinOp::Xor,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::Variable("B".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_not() {
+        assert_eq!(
+            parse_expr("NOT A"),
+            Expr::UnaryNot(Box::new(Expr::Variable("A".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_parse_not_double() {
+        assert_eq!(
+            parse_expr("NOT NOT A"),
+            Expr::UnaryNot(Box::new(Expr::UnaryNot(Box::new(Expr::Variable("A".to_string())))))
+        );
+    }
+
+    #[test]
+    fn test_parse_and_or_precedence() {
+        // A OR B AND C should parse as A OR (B AND C) because AND binds tighter
+        assert_eq!(
+            parse_expr("A OR B AND C"),
+            Expr::BinaryOp {
+                op: BinOp::Or,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::BinaryOp {
+                    op: BinOp::And,
+                    left: Box::new(Expr::Variable("B".to_string())),
+                    right: Box::new(Expr::Variable("C".to_string())),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_xor_between_or_and_and() {
+        // A OR B XOR C AND D should be A OR ((B XOR (C AND D)))
+        // OR is lowest, then XOR, then AND
+        assert_eq!(
+            parse_expr("A OR B XOR C AND D"),
+            Expr::BinaryOp {
+                op: BinOp::Or,
+                left: Box::new(Expr::Variable("A".to_string())),
+                right: Box::new(Expr::BinaryOp {
+                    op: BinOp::Xor,
+                    left: Box::new(Expr::Variable("B".to_string())),
+                    right: Box::new(Expr::BinaryOp {
+                        op: BinOp::And,
+                        left: Box::new(Expr::Variable("C".to_string())),
+                        right: Box::new(Expr::Variable("D".to_string())),
+                    }),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_not_with_comparison() {
+        // NOT X = 5 should be NOT (X = 5) since NOT is above comparison
+        assert_eq!(
+            parse_expr("NOT X = 5"),
+            Expr::UnaryNot(Box::new(Expr::BinaryOp {
+                op: BinOp::Equal,
+                left: Box::new(Expr::Variable("X".to_string())),
+                right: Box::new(Expr::Number(5.0)),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_parse_comparison_and_logical() {
+        // X > 0 AND Y < 10 should be (X > 0) AND (Y < 10)
+        assert_eq!(
+            parse_expr("X > 0 AND Y < 10"),
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left: Box::new(Expr::BinaryOp {
+                    op: BinOp::Greater,
+                    left: Box::new(Expr::Variable("X".to_string())),
+                    right: Box::new(Expr::Number(0.0)),
+                }),
+                right: Box::new(Expr::BinaryOp {
+                    op: BinOp::Less,
+                    left: Box::new(Expr::Variable("Y".to_string())),
+                    right: Box::new(Expr::Number(10.0)),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_or_left_associative() {
+        // A OR B OR C should be (A OR B) OR C
+        assert_eq!(
+            parse_expr("A OR B OR C"),
+            Expr::BinaryOp {
+                op: BinOp::Or,
+                left: Box::new(Expr::BinaryOp {
+                    op: BinOp::Or,
+                    left: Box::new(Expr::Variable("A".to_string())),
+                    right: Box::new(Expr::Variable("B".to_string())),
+                }),
+                right: Box::new(Expr::Variable("C".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_and_left_associative() {
+        // A AND B AND C should be (A AND B) AND C
+        assert_eq!(
+            parse_expr("A AND B AND C"),
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left: Box::new(Expr::BinaryOp {
+                    op: BinOp::And,
+                    left: Box::new(Expr::Variable("A".to_string())),
+                    right: Box::new(Expr::Variable("B".to_string())),
+                }),
+                right: Box::new(Expr::Variable("C".to_string())),
+            }
         );
     }
 }

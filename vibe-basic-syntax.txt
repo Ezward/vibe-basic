@@ -32,7 +32,11 @@ print_list      = print_item { print_item } ;
 print_item      = expression | ";" | "," ;
 
 (* Expressions — listed from lowest to highest precedence *)
-expression      = comparison ;
+expression      = or_expr ;
+or_expr         = xor_expr { "OR" xor_expr } ;
+xor_expr        = and_expr { "XOR" and_expr } ;
+and_expr        = not_expr { "AND" not_expr } ;
+not_expr        = "NOT" not_expr | comparison ;
 comparison      = additive { comp_op additive } ;
 comp_op         = "=" | "<>" | "<" | ">" | "<=" | ">=" ;
 additive        = term { ( "+" | "-" ) term } ;
@@ -103,6 +107,10 @@ II. SEMANTIC EXPLANATIONS
 
 9. Expressions
    Operator precedence (lowest to highest):
+     - Logical OR:  OR
+     - Logical XOR: XOR
+     - Logical AND: AND
+     - Logical NOT: NOT (unary)
      - Comparison:  =  <>  <  >  <=  >=
      - Additive:    +  -
      - Multiplicative:  *  /
@@ -110,6 +118,10 @@ II. SEMANTIC EXPLANATIONS
      - Unary:       - (negation)
    All binary operators are left-associative.
    Comparison operators return -1 for true and 0 for false (MS-BASIC style).
+   Logical operators (AND, OR, XOR, NOT) operate as bitwise integer operations.
+   Since comparisons return -1 (all bits set) for true and 0 for false, logical
+   operations work correctly for boolean logic: NOT 0 = -1, NOT -1 = 0,
+   -1 AND -1 = -1, -1 OR 0 = -1, -1 XOR -1 = 0.
    The + operator performs string concatenation when both operands are strings.
    String comparison is supported with all comparison operators.
 

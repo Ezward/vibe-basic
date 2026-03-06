@@ -3,7 +3,8 @@
 //! This module provides the `Value` enum for runtime values (numbers and strings),
 //! and the `Evaluator` struct which evaluates parsed expression trees against a
 //! variable store. It supports arithmetic, string concatenation, comparison operators
-//! (returning MS-BASIC style -1/0), and built-in functions (INT, ABS, SQR, RND, LEN).
+//! (returning MS-BASIC style -1/0), logical operators (AND, OR, XOR, NOT as bitwise
+//! integer operations), and built-in functions (INT, ABS, SQR, RND, LEN).
 
 use crate::expr::{BinOp, Expr};
 use rand::Rng;
@@ -16,6 +17,8 @@ enum EvalStep<'a> {
     Eval(&'a Expr),
     /// Pop one value, negate it, push the result.
     ApplyUnaryMinus,
+    /// Pop one value, apply bitwise NOT, push the result.
+    ApplyUnaryNot,
     /// Pop two values (right then left), apply the operator, push the result.
     ApplyBinaryOp(&'a BinOp),
     /// Pop `arg_count` values, call the named built-in function, push the result.
@@ -125,6 +128,10 @@ impl Evaluator {
                         work.push(EvalStep::ApplyUnaryMinus);
                         work.push(EvalStep::Eval(inner));
                     }
+                    Expr::UnaryNot(inner) => {
+                        work.push(EvalStep::ApplyUnaryNot);
+                        work.push(EvalStep::Eval(inner));
+                    }
                     Expr::BinaryOp { op, left, right } => {
                         work.push(EvalStep::ApplyBinaryOp(op));
                         work.push(EvalStep::Eval(right));
@@ -140,6 +147,11 @@ impl Evaluator {
                 EvalStep::ApplyUnaryMinus => {
                     let val = values.pop().expect("value stack underflow").as_number()?;
                     values.push(Value::Number(-val));
+                }
+                EvalStep::ApplyUnaryNot => {
+                    let val = values.pop().expect("value stack underflow").as_number()?;
+                    let int_val = val as i64;
+                    values.push(Value::Number(!int_val as f64));
                 }
                 EvalStep::ApplyBinaryOp(op) => {
                     let rval = values.pop().expect("value stack underflow");
@@ -200,6 +212,9 @@ impl Evaluator {
             BinOp::Greater => Value::Number(if l > r { -1.0 } else { 0.0 }),
             BinOp::LessEqual => Value::Number(if l <= r { -1.0 } else { 0.0 }),
             BinOp::GreaterEqual => Value::Number(if l >= r { -1.0 } else { 0.0 }),
+            BinOp::And => Value::Number((l as i64 & r as i64) as f64),
+            BinOp::Or => Value::Number((l as i64 | r as i64) as f64),
+            BinOp::Xor => Value::Number((l as i64 ^ r as i64) as f64),
         };
         Ok(result)
     }
@@ -759,7 +774,244 @@ mod tests {
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
         let mut evaluator = Evaluator::new();
-        evaluator.variables.insert("X".to_string(), Value::String("hello".to_string()));
+        evaluator
+            .variables
+            .insert("X".to_string(), Value::String("hello".to_string()));
         assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    // --- Logical operator tests ---
+
+    #[test]
+    fn test_eval_and_true_true() {
+        // -1 AND -1 = -1 (true AND true = true)
+        assert_eq!(eval("(1 = 1) AND (2 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_and_true_false() {
+        // -1 AND 0 = 0 (true AND false = false)
+        assert_eq!(eval("(1 = 1) AND (1 = 2)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_and_false_false() {
+        // 0 AND 0 = 0
+        assert_eq!(eval("(1 = 2) AND (3 = 4)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_or_true_false() {
+        // -1 OR 0 = -1 (true OR false = true)
+        assert_eq!(eval("(1 = 1) OR (1 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_or_false_false() {
+        // 0 OR 0 = 0
+        assert_eq!(eval("(1 = 2) OR (3 = 4)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_or_true_true() {
+        // -1 OR -1 = -1
+        assert_eq!(eval("(1 = 1) OR (2 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_xor_true_true() {
+        // -1 XOR -1 = 0
+        assert_eq!(eval("(1 = 1) XOR (2 = 2)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_xor_true_false() {
+        // -1 XOR 0 = -1
+        assert_eq!(eval("(1 = 1) XOR (1 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_xor_false_false() {
+        // 0 XOR 0 = 0
+        assert_eq!(eval("(1 = 2) XOR (3 = 4)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_not_true() {
+        // NOT -1 = 0
+        assert_eq!(eval("NOT (1 = 1)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_not_false() {
+        // NOT 0 = -1
+        assert_eq!(eval("NOT (1 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_not_double() {
+        // NOT NOT -1 = -1
+        assert_eq!(eval("NOT NOT (1 = 1)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_and_with_comparisons() {
+        let result = eval_with_vars("X > 0 AND X < 10", vec![("X", Value::Number(5.0))]);
+        assert_eq!(result, Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_and_with_comparisons_false() {
+        let result = eval_with_vars("X > 0 AND X < 10", vec![("X", Value::Number(15.0))]);
+        assert_eq!(result, Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_or_with_comparisons() {
+        let result = eval_with_vars("X < 0 OR X > 10", vec![("X", Value::Number(15.0))]);
+        assert_eq!(result, Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_not_with_comparison() {
+        let result = eval_with_vars("NOT X = 5", vec![("X", Value::Number(3.0))]);
+        assert_eq!(result, Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_not_with_comparison_true() {
+        let result = eval_with_vars("NOT X = 5", vec![("X", Value::Number(5.0))]);
+        assert_eq!(result, Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_complex_logical() {
+        // (X > 0 AND X < 10) OR Y = 0
+        let result = eval_with_vars(
+            "(X > 0 AND X < 10) OR Y = 0",
+            vec![("X", Value::Number(15.0)), ("Y", Value::Number(0.0))],
+        );
+        assert_eq!(result, Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_and_bitwise_integers() {
+        // 5 AND 3 = 1 (bitwise: 101 & 011 = 001)
+        assert_eq!(eval("5 AND 3"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_or_bitwise_integers() {
+        // 5 OR 3 = 7 (bitwise: 101 | 011 = 111)
+        assert_eq!(eval("5 OR 3"), Value::Number(7.0));
+    }
+
+    #[test]
+    fn test_eval_xor_bitwise_integers() {
+        // 5 XOR 3 = 6 (bitwise: 101 ^ 011 = 110)
+        assert_eq!(eval("5 XOR 3"), Value::Number(6.0));
+    }
+
+    #[test]
+    fn test_eval_not_zero() {
+        // NOT 0 = -1
+        assert_eq!(eval("NOT 0"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_not_one() {
+        // NOT 1 = -2 (bitwise complement of 1)
+        assert_eq!(eval("NOT 1"), Value::Number(-2.0));
+    }
+
+    #[test]
+    fn test_eval_not_string_error() {
+        let tokens = Lexer::new("NOT X").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        evaluator
+            .variables
+            .insert("X".to_string(), Value::String("hello".to_string()));
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_and_string_error() {
+        let tokens = Lexer::new("X AND Y").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        evaluator
+            .variables
+            .insert("X".to_string(), Value::String("hello".to_string()));
+        evaluator.variables.insert("Y".to_string(), Value::Number(1.0));
+        assert!(evaluator.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_eval_logical_precedence_and_before_or() {
+        // 0 OR -1 AND -1 = 0 OR (-1 AND -1) = 0 OR -1 = -1
+        // Using comparison results: (1=2) OR (1=1) AND (2=2) = 0 OR (-1 AND -1) = 0 OR -1 = -1
+        assert_eq!(eval("(1 = 2) OR (1 = 1) AND (2 = 2)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_logical_with_randomized_and() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..20 {
+            let a: i64 = rng.gen_range(-100..100);
+            let b: i64 = rng.gen_range(-100..100);
+            let input = format!("{} AND {}", a, b);
+            let result = eval(&input);
+            assert_eq!(result, Value::Number((a & b) as f64));
+        }
+    }
+
+    #[test]
+    fn test_eval_logical_with_randomized_or() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..20 {
+            let a: i64 = rng.gen_range(-100..100);
+            let b: i64 = rng.gen_range(-100..100);
+            let input = if a < 0 && b < 0 {
+                format!("({}) OR ({})", a, b)
+            } else if a < 0 {
+                format!("({}) OR {}", a, b)
+            } else if b < 0 {
+                format!("{} OR ({})", a, b)
+            } else {
+                format!("{} OR {}", a, b)
+            };
+            let result = eval(&input);
+            assert_eq!(result, Value::Number((a | b) as f64));
+        }
+    }
+
+    #[test]
+    fn test_eval_logical_with_randomized_xor() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..20 {
+            let a: i64 = rng.gen_range(0..100);
+            let b: i64 = rng.gen_range(0..100);
+            let input = format!("{} XOR {}", a, b);
+            let result = eval(&input);
+            assert_eq!(result, Value::Number((a ^ b) as f64));
+        }
+    }
+
+    #[test]
+    fn test_eval_logical_with_randomized_not() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..20 {
+            let a: i64 = rng.gen_range(0..100);
+            let input = format!("NOT {}", a);
+            let result = eval(&input);
+            assert_eq!(result, Value::Number(!a as f64));
+        }
     }
 }
