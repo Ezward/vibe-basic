@@ -244,7 +244,6 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Next { variable })
             }
             Token::Rem(text) => {
-                let text = text;
                 self.advance();
                 Ok(Statement::Rem(text))
             }

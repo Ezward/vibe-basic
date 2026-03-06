@@ -399,23 +399,20 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             let fake_tokens = Lexer::new(&fake_line).tokenize();
             let source_lines: Vec<String> = vec![fake_line.clone()];
             let mut parser = Parser::new(&fake_tokens, source_lines);
-            match parser.parse_program() {
-                Ok(prog) => {
-                    if let Some(first_line) = prog.lines.first() {
-                        if let Some(stmt) = first_line.statements.first() {
-                            match stmt {
-                                Statement::Let { .. } => {
-                                    return DebugCommand::Let(stmt.clone());
-                                }
-                                Statement::Print { items } => {
-                                    return DebugCommand::Print(items.clone());
-                                }
-                                _ => {}
+            if let Ok(prog) = parser.parse_program() {
+                if let Some(first_line) = prog.lines.first() {
+                    if let Some(stmt) = first_line.statements.first() {
+                        match stmt {
+                            Statement::Let { .. } => {
+                                return DebugCommand::Let(stmt.clone());
                             }
+                            Statement::Print { items } => {
+                                return DebugCommand::Print(items.clone());
+                            }
+                            _ => {}
                         }
                     }
                 }
-                Err(_) => {}
             }
             return DebugCommand::Unknown(line.to_string());
         }

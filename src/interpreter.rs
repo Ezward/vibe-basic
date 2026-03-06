@@ -55,7 +55,6 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             let line = &program.lines[line_idx];
             let mut stmt_idx = 0;
             let mut next_line_idx = line_idx + 1;
-            let mut jumped = false;
 
             while stmt_idx < line.statements.len() {
                 let stmt = &line.statements[stmt_idx];
@@ -80,7 +79,6 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                                 .unwrap_or("<unknown>");
                             format!("{}\n  at line {}: {}", e, line.source_line, source_text)
                         })?;
-                        jumped = true;
                         break;
                     }
                     StmtResult::End => return Ok(()),
@@ -90,17 +88,12 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     }
                     StmtResult::ForLoopSkip(target_idx) => {
                         next_line_idx = target_idx;
-                        jumped = true;
                         break;
                     }
                 }
             }
 
-            if jumped {
-                line_idx = next_line_idx;
-            } else {
-                line_idx = next_line_idx;
-            }
+            line_idx = next_line_idx;
         }
         Ok(())
     }
@@ -248,7 +241,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     /// semicolons suppress spacing, and a trailing separator suppresses the newline.
     pub(crate) fn execute_print(&mut self, items: &[PrintItem]) -> Result<(), String> {
         if items.is_empty() {
-            write!(self.output, "\n").map_err(|e| e.to_string())?;
+            writeln!(self.output).map_err(|e| e.to_string())?;
             self.column = 0;
             return Ok(());
         }
@@ -278,7 +271,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         }
 
         if !trailing_separator {
-            write!(self.output, "\n").map_err(|e| e.to_string())?;
+            writeln!(self.output).map_err(|e| e.to_string())?;
             self.column = 0;
         }
 

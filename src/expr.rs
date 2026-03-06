@@ -170,12 +170,10 @@ impl<'a> ExprParser<'a> {
     fn parse_factor(&mut self) -> Result<Expr, String> {
         match self.peek().clone() {
             Token::Number(n) => {
-                let n = n;
                 self.advance();
                 Ok(Expr::Number(n))
             }
             Token::StringLiteral(s) => {
-                let s = s;
                 self.advance();
                 Ok(Expr::StringLiteral(s))
             }
@@ -189,7 +187,6 @@ impl<'a> ExprParser<'a> {
                 Ok(expr)
             }
             Token::Identifier(name) => {
-                let name = name;
                 self.advance();
                 // Check if it's a function call
                 if *self.peek() == Token::LeftParen {
