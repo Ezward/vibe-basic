@@ -27,6 +27,7 @@ enum DebugCommand {
     Let(Statement),
     Print(Vec<PrintItem>),
     List(Option<u32>, Option<u32>),
+    Help,
     Quit,
     Unknown(String),
 }
@@ -68,7 +69,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
 
         writeln!(
             self.interpreter.output,
-            "BASIC Debugger. Type STEP, RUN, LIST, BREAK AT <n>, BREAK IF <expr>, GOTO <n>, LET, PRINT, or QUIT."
+            "BASIC Debugger. Type HELP for a list of commands."
         )
         .map_err(|e| e.to_string())?;
 
@@ -172,6 +173,21 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                             .unwrap_or("");
                         let _ = writeln!(self.interpreter.output, "{}", text);
                     }
+                }
+                DebugCommand::Help => {
+                    let _ = writeln!(self.interpreter.output, "Debugger commands:");
+                    let _ = writeln!(self.interpreter.output, "  STEP              Execute the current line and advance");
+                    let _ = writeln!(self.interpreter.output, "  RUN               Run until a breakpoint or program end");
+                    let _ = writeln!(self.interpreter.output, "  LIST              List all program lines");
+                    let _ = writeln!(self.interpreter.output, "  LIST <start>      List from line <start> onward");
+                    let _ = writeln!(self.interpreter.output, "  LIST <start> <end>  List lines from <start> to <end>");
+                    let _ = writeln!(self.interpreter.output, "  BREAK AT <line>   Set a breakpoint at a line number");
+                    let _ = writeln!(self.interpreter.output, "  BREAK IF <expr>   Set a conditional breakpoint");
+                    let _ = writeln!(self.interpreter.output, "  GOTO <line>       Jump to a line number");
+                    let _ = writeln!(self.interpreter.output, "  PRINT <expr>      Evaluate and print an expression");
+                    let _ = writeln!(self.interpreter.output, "  LET <var> = <val> Set a variable's value");
+                    let _ = writeln!(self.interpreter.output, "  QUIT              Exit the debugger");
+                    let _ = writeln!(self.interpreter.output, "  HELP              Show this help message");
                 }
                 DebugCommand::Unknown(s) => {
                     let _ = writeln!(self.interpreter.output, "Unknown command: {}", s);
@@ -319,6 +335,9 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         }
         if upper == "QUIT" {
             return DebugCommand::Quit;
+        }
+        if upper == "HELP" {
+            return DebugCommand::Help;
         }
 
         // LIST [start [end]]

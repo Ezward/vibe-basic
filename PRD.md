@@ -35,6 +35,7 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
       - Optionally it can take a BASIC line number that represents the first line to print.  So LIST 300 would start the printing at BASIC line 300.
       - Optionally, after the first line number it can take a second line number that represents the last line to print.  So LIST 300 400 would print all basic lines from 300 to an including line 400.
     - QUIT: This debugger command exits the program and quits back to the operating system.
+    - HELP: Print the list of debugging commands and how they are used.
 
 
 
