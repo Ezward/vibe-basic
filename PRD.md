@@ -44,7 +44,7 @@ Generally:
 
 - Use the Rust language to implement the code.
 - Always run `cargo fmt` on the code to ensure standard formatting.  Use a 120 character line length.
-- Always include unit tests for happy paths and edge cases.
+- Always include unit tests for happy paths and edge cases.  Unit tests should use randomized data where possible to avoid tests that only pass with a fixed data set.
 - Always make sure the program will compile without errors or warnings.  Fix any errors or warnings.
 - Always make sure the unit tests compile without errors or warnings and the tests run without failures.   Fix any errors or warnings or test failures.
 - Always document functions.

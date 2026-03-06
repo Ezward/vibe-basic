@@ -1,75 +1,134 @@
 ================================================================================
-MS-BASIC LANGUAGE SPECIFICATION: GRAMMAR, SEMANTICS, AND EXAMPLES
+VIBE BASIC LANGUAGE SPECIFICATION: GRAMMAR, SEMANTICS, AND EXAMPLES
 ================================================================================
 
 I. EBNF GRAMMAR
 --------------------------------------------------------------------------------
+(* Note: All keywords and identifiers are case-insensitive. *)
+
 (* Structure *)
 program         = { line } ;
 line            = line_number statement { ":" statement } newline ;
 line_number     = digit { digit } ;
 
 (* Statements *)
-statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt | 
+statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt |
                   for_stmt | next_stmt | remark | end_stmt ;
 
 let_stmt        = [ "LET" ] variable "=" expression ;
-print_stmt      = "PRINT" [ expression_list ] ;
-if_stmt         = "IF" expression "THEN" ( line_number | statement )
-                  [ "ELSE" ( line_number | statement ) ] ;
+print_stmt      = "PRINT" [ print_list ] ;
+if_stmt         = "IF" expression "THEN" then_clause [ "ELSE" then_clause ] ;
+then_clause     = line_number | statement ;
 goto_stmt       = "GOTO" line_number ;
 input_stmt      = "INPUT" [ string_literal ";" ] variable ;
-for_stmt        = "FOR" variable "=" expression "TO" expression [ "STEP" expression ] ;
+for_stmt        = "FOR" variable "=" expression "TO" expression
+                  [ "STEP" expression ] ;
 next_stmt       = "NEXT" [ variable ] ;
 remark          = ( "REM" | "'" ) { character } ;
 end_stmt        = "END" ;
 
-(* Expressions *)
-expression      = term { ( "+" | "-" ) term } ;
-term            = factor { ( "*" | "/" ) factor } ;
-factor          = variable | number | string_literal | "(" expression ")" | function ;
-variable        = letter [ letter | digit ] [ "$" | "%" | "!" | "#" ] ;
-number          = [ "-" ] digit { digit } [ "." { digit } ] ;
+(* Print list *)
+print_list      = print_item { print_item } ;
+print_item      = expression | ";" | "," ;
+
+(* Expressions — listed from lowest to highest precedence *)
+expression      = comparison ;
+comparison      = additive { comp_op additive } ;
+comp_op         = "=" | "<>" | "<" | ">" | "<=" | ">=" ;
+additive        = term { ( "+" | "-" ) term } ;
+term            = power { ( "*" | "/" ) power } ;
+power           = unary { "^" unary } ;
+unary           = "-" unary | factor ;
+factor          = number | string_literal | "(" expression ")"
+                | function_call | variable ;
+function_call   = identifier "(" [ expression { "," expression } ] ")" ;
+
+(* Terminals *)
+variable        = identifier [ "$" | "%" | "!" | "#" ] ;
+identifier      = letter { letter | digit | "_" } ;
+number          = digit { digit } [ "." { digit } ] ;
 string_literal  = '"' { character } '"' ;
+letter          = "A" | ... | "Z" | "a" | ... | "z" ;
+digit           = "0" | ... | "9" ;
 
 
 II. SEMANTIC EXPLANATIONS
 --------------------------------------------------------------------------------
 1. LET (Assignment)
-   Action: Evaluates the expression on the right and stores the result in the 
-   memory location associated with the variable.
-   Note: String variables ($) must receive string values.
+   Action: Evaluates the expression on the right and stores the result in the
+   memory location associated with the variable. The "LET" keyword is optional;
+   a bare variable assignment (e.g., X = 5) is treated as an implicit LET.
+   Note: String variables (ending with $) must receive string values.
 
 2. PRINT (Output)
-   Action: Sends data to the screen. 
-   - A semicolon (;) suppresses the newline, keeping the cursor in place.
+   Action: Sends data to the screen.
+   - A semicolon (;) suppresses spacing between items.
    - A comma (,) moves the cursor to the next 14-character tab zone.
+   - A trailing semicolon or comma suppresses the newline at end of line.
+   - PRINT with no arguments outputs a blank line.
 
 3. INPUT (Data Entry)
-   Action: Pauses the program and displays a "?" prompt. It waits for the user 
+   Action: Pauses the program and displays a "? " prompt. It waits for the user
    to type a value and press ENTER before assigning that value to the variable.
+   An optional prompt string followed by ";" may precede the variable name.
+   String variables (ending with $) receive the input as a string; numeric
+   variables attempt to parse the input as a number.
 
 4. GOTO (Branching)
-   Action: Changes the Program Counter to the specified line number. This is 
+   Action: Changes the Program Counter to the specified line number. This is
    the primary method for creating loops or jumping over sections of code.
 
 5. IF...THEN...ELSE (Conditional)
-   Action: Evaluates a logic expression. If True (non-zero), it executes the
-   clause after THEN. If False (zero) and an ELSE clause is present, it
-   executes the clause after ELSE. If False and no ELSE clause is present,
-   it skips to the next line number.
+   Action: Evaluates an expression. If truthy (non-zero for numbers, non-empty
+   for strings), it executes the clause after THEN. If falsy and an ELSE clause
+   is present, it executes the ELSE clause. If falsy and no ELSE clause is
+   present, it skips the remaining statements on the current line.
+   Both THEN and ELSE may target either a line number (implicit GOTO) or an
+   inline statement.
 
 6. FOR / NEXT (Iteration)
-   Action: Automates a loop. FOR sets a start and end limit. NEXT increments 
-   the counter and sends the program back to the FOR line until the limit is 
-   reached.
+   Action: Automates a counted loop. FOR sets the loop variable to a start
+   value and specifies an end limit and optional STEP increment (default 1).
+   NEXT increments the counter by the step value and loops back to the line
+   after FOR until the limit is exceeded. Nested FOR/NEXT loops are supported.
+   If the initial value already exceeds the limit (respecting STEP direction),
+   the loop body is skipped entirely.
 
 7. REM (Remark)
-   Action: Ignored by the computer. Used for human-readable notes.
+   Action: Ignored by the interpreter. Used for human-readable notes. Both the
+   REM keyword and the apostrophe (') syntax consume the rest of the line.
 
 8. END (Termination)
-   Action: Effectively stops the program and returns the user to the 
-   interpreter's command prompt.
+   Action: Stops program execution immediately.
+
+9. Expressions
+   Operator precedence (lowest to highest):
+     - Comparison:  =  <>  <  >  <=  >=
+     - Additive:    +  -
+     - Multiplicative:  *  /
+     - Exponentiation:  ^
+     - Unary:       - (negation)
+   All binary operators are left-associative.
+   Comparison operators return -1 for true and 0 for false (MS-BASIC style).
+   The + operator performs string concatenation when both operands are strings.
+   String comparison is supported with all comparison operators.
+
+10. Built-in Functions
+    - INT(x)   — Returns the floor of x (rounds toward negative infinity).
+    - ABS(x)   — Returns the absolute value of x.
+    - SQR(x)   — Returns the square root of x.
+    - RND(x)   — Returns a random number in [0.0, 1.0). The argument is
+                  required but its value is ignored (MS-BASIC compatibility).
+    - LEN(s$)  — Returns the length of string s$.
+
+11. Variables
+    Variable names may contain letters, digits, and underscores, and must
+    start with a letter. Names are case-insensitive and stored uppercase.
+    An optional type sigil at the end indicates the variable type:
+      $  string,  %  integer,  !  single-precision,  #  double-precision.
+
+12. Multi-statement Lines
+    Multiple statements may appear on a single line, separated by colons (:).
 
 
 III. CODE EXAMPLES AND OUTPUT
@@ -102,12 +161,51 @@ EXAMPLE 3: THE FOR-NEXT LOOP
 Code:
 10 PRINT "POWERS OF 2:"
 20 FOR I = 1 TO 5
-30 PRINT 2 ^ I;
+30   PRINT 2 ^ I;
 40 NEXT I
 50 END
 
 Output:
 POWERS OF 2:
 2 4 8 16 32
+
+EXAMPLE 4: NESTED LOOPS
+Code:
+10 FOR I = 1 TO 2
+20   FOR J = 1 TO 2
+30     PRINT I; J;
+40   NEXT J
+50   PRINT
+60 NEXT I
+70 END
+
+Output:
+ 1  1  1  2
+ 2  1  2  2
+
+EXAMPLE 5: BUILT-IN FUNCTIONS
+Code:
+10 PRINT "INT(3.7) ="; INT(3.7)
+20 PRINT "ABS(-5) ="; ABS(-5)
+30 PRINT "SQR(9) ="; SQR(9)
+40 PRINT "RANDOM:"; INT(RND(1) * 100)
+50 PRINT "LEN ="; LEN("HELLO")
+60 END
+
+Output:
+INT(3.7) = 3
+ABS(-5) = 5
+SQR(9) = 3
+RANDOM: 42
+LEN = 5
+
+EXAMPLE 6: MULTI-STATEMENT LINE AND IMPLICIT LET
+Code:
+10 X = 0 : Y = 10
+20 PRINT X; Y
+30 END
+
+Output:
+ 0  10
 
 ================================================================================

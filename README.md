@@ -41,7 +41,7 @@ Operator precedence (highest to lowest): parentheses, unary minus, `^`, `*` `/`,
 
 ### Variables
 
-Variable names are 1-2 alphanumeric characters, optionally followed by a type sigil:
+Variable names start with a letter and may contain letters, digits, and underscores. Names are case-insensitive (stored uppercase). An optional type sigil at the end indicates the type:
 
 - `$` — string (e.g., `N$`)
 - `%` — integer (e.g., `X%`)
@@ -126,7 +126,9 @@ The debugger provides a REPL with the following commands:
 | `BREAK AT n` | Set a breakpoint at line number n |
 | `BREAK IF expr` | Set a conditional breakpoint |
 | `LET var = expr` | Modify a variable during execution |
-| `PRINT expr` | Inspect a variable or expression |
+| `PRINT expr` | Evaluate and print an expression |
+| `var = expr` | Shorthand for `LET var = expr` (implicit LET) |
+| `HELP` | Show a list of debugger commands |
 | `QUIT` | Exit the debugger |
 
 The prompt shows the current line number (e.g., `[DBG line 20]>`) or `[DBG finished]>` when the program has ended.
