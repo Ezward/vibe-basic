@@ -1026,4 +1026,150 @@ mod tests {
         .unwrap();
         assert_eq!(output, "FIVE\n");
     }
+
+    // --- String function integration tests ---
+
+    #[test]
+    fn test_left_function() {
+        let output = run_program("10 PRINT LEFT$(\"HELLO WORLD\", 5)\n20 END\n").unwrap();
+        assert_eq!(output, "HELLO\n");
+    }
+
+    #[test]
+    fn test_right_function() {
+        let output = run_program("10 PRINT RIGHT$(\"HELLO WORLD\", 5)\n20 END\n").unwrap();
+        assert_eq!(output, "WORLD\n");
+    }
+
+    #[test]
+    fn test_mid_function() {
+        let output = run_program("10 PRINT MID$(\"HELLO WORLD\", 7, 5)\n20 END\n").unwrap();
+        assert_eq!(output, "WORLD\n");
+    }
+
+    #[test]
+    fn test_mid_function_no_length() {
+        let output = run_program("10 PRINT MID$(\"HELLO WORLD\", 7)\n20 END\n").unwrap();
+        assert_eq!(output, "WORLD\n");
+    }
+
+    #[test]
+    fn test_instr_function() {
+        let output = run_program("10 PRINT INSTR(\"HELLO WORLD\", \"WORLD\")\n20 END\n").unwrap();
+        assert_eq!(output, " 7 \n");
+    }
+
+    #[test]
+    fn test_asc_function() {
+        let output = run_program("10 PRINT ASC(\"A\")\n20 END\n").unwrap();
+        assert_eq!(output, " 65 \n");
+    }
+
+    #[test]
+    fn test_chr_function() {
+        let output = run_program("10 PRINT CHR$(65)\n20 END\n").unwrap();
+        assert_eq!(output, "A\n");
+    }
+
+    #[test]
+    fn test_str_function() {
+        let output = run_program("10 PRINT \"NUM:\" + STR$(42)\n20 END\n").unwrap();
+        assert_eq!(output, "NUM: 42\n");
+    }
+
+    #[test]
+    fn test_val_function() {
+        let output = run_program("10 PRINT VAL(\"42\") + 8\n20 END\n").unwrap();
+        assert_eq!(output, " 50 \n");
+    }
+
+    #[test]
+    fn test_hex_function() {
+        let output = run_program("10 PRINT HEX$(255)\n20 END\n").unwrap();
+        assert_eq!(output, "FF\n");
+    }
+
+    #[test]
+    fn test_oct_function() {
+        let output = run_program("10 PRINT OCT$(8)\n20 END\n").unwrap();
+        assert_eq!(output, "10\n");
+    }
+
+    #[test]
+    fn test_string_function() {
+        let output = run_program("10 PRINT STRING$(5, \"*\")\n20 END\n").unwrap();
+        assert_eq!(output, "*****\n");
+    }
+
+    #[test]
+    fn test_space_function() {
+        let output = run_program("10 PRINT \"A\"; SPACE$(3); \"B\"\n20 END\n").unwrap();
+        assert_eq!(output, "A   B\n");
+    }
+
+    #[test]
+    fn test_spc_function() {
+        let output = run_program("10 PRINT \"A\"; SPC(5); \"B\"\n20 END\n").unwrap();
+        assert_eq!(output, "A     B\n");
+    }
+
+    #[test]
+    fn test_string_functions_in_loop() {
+        let output = run_program(
+            "\
+10 LET S$ = \"ABCDE\"
+20 FOR I = 1 TO 5
+30 PRINT MID$(S$, I, 1);
+40 NEXT I
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ABCDE");
+    }
+
+    #[test]
+    fn test_string_reverse_with_functions() {
+        let output = run_program(
+            "\
+10 LET S$ = \"ABCD\"
+20 LET R$ = \"\"
+30 FOR I = LEN(S$) TO 1 STEP -1
+40 R$ = R$ + MID$(S$, I, 1)
+50 NEXT I
+60 PRINT R$
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DCBA\n");
+    }
+
+    #[test]
+    fn test_val_str_roundtrip_program() {
+        let output = run_program(
+            "\
+10 LET X = 123
+20 LET S$ = STR$(X)
+30 LET Y = VAL(S$)
+40 IF Y = X THEN PRINT \"MATCH\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "MATCH\n");
+    }
+
+    #[test]
+    fn test_hex_oct_conversion() {
+        let output = run_program(
+            "\
+10 PRINT \"HEX:\"; HEX$(42)
+20 PRINT \"OCT:\"; OCT$(42)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "HEX:2A\nOCT:52\n");
+    }
 }

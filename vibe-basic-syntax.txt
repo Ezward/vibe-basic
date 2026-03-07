@@ -126,12 +126,47 @@ II. SEMANTIC EXPLANATIONS
    String comparison is supported with all comparison operators.
 
 10. Built-in Functions
+    Numeric Functions:
     - INT(x)   — Returns the floor of x (rounds toward negative infinity).
     - ABS(x)   — Returns the absolute value of x.
     - SQR(x)   — Returns the square root of x.
     - RND(x)   — Returns a random number in [0.0, 1.0). The argument is
                   required but its value is ignored (MS-BASIC compatibility).
+
+    String / Substring Functions:
     - LEN(s$)  — Returns the length of string s$.
+    - LEFT$(x$, n)  — Returns the first n characters from string x$.
+    - RIGHT$(x$, n) — Returns the last n characters from string x$.
+    - MID$(x$, n [, m]) — Returns a substring starting at position n
+                  (1-based). If m is given, returns at most m characters;
+                  otherwise returns everything from position n to the end.
+    - INSTR([n,] x$, y$) — Returns the 1-based position of the first
+                  occurrence of y$ in x$, or 0 if not found. Optional n
+                  specifies the starting search position.
+
+    Conversion Functions:
+    - ASC(x$)  — Returns the ASCII code of the first character of x$.
+    - CHR$(n)  — Returns the character with ASCII code n.
+    - STR$(x)  — Converts number x to its string representation (positive
+                  numbers include a leading space).
+    - VAL(x$)  — Converts string x$ to a number (returns 0 if non-numeric).
+    - HEX$(x)  — Converts number x to an uppercase hexadecimal string.
+    - OCT$(x)  — Converts number x to an octal string.
+
+    Formatting and Creation Functions:
+    - STRING$(n, x$) — Returns a string of n copies of the first character
+                  of x$. STRING$(n, m) uses the character with ASCII code m.
+    - SPACE$(n) — Returns a string of n spaces.
+    - SPC(n)   — Returns n spaces (for use in PRINT statements).
+    - TAB(n)   — Returns n spaces (simplified; for use in PRINT statements).
+
+    Binary/Random File Data Functions:
+    - MKI$(x)  — Converts integer x to a 2-byte string (little-endian).
+    - MKS$(x)  — Converts single-precision x to a 4-byte string.
+    - MKD$(x)  — Converts double-precision x to an 8-byte string.
+    - CVI(x$)  — Converts a 2-byte string back to an integer.
+    - CVS(x$)  — Converts a 4-byte string back to single-precision.
+    - CVD(x$)  — Converts an 8-byte string back to double-precision.
 
 11. Variables
     Variable names may contain letters, digits, and underscores, and must
