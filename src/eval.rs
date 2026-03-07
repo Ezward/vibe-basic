@@ -4,13 +4,21 @@
 //! and the `Evaluator` struct which evaluates parsed expression trees against a
 //! variable store. It supports arithmetic, string concatenation, comparison operators
 //! (returning MS-BASIC style -1/0), logical operators (AND, OR, XOR, NOT as bitwise
-//! integer operations), and built-in functions including numeric (INT, ABS, SQR, RND),
-//! string (LEN, LEFT$, RIGHT$, MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$,
-//! STRING$, SPACE$, SPC, TAB), and binary data (MKI$, MKS$, MKD$, CVI, CVS, CVD).
+//! integer operations), and built-in functions including numeric (INT, ABS, SQR, RND,
+//! EXP, LOG, SGN, SIN, COS, TAN, ATN, FIX, CINT, CSNG, CDBL), string (LEN, LEFT$,
+//! RIGHT$, MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$, STRING$, SPACE$, SPC, TAB),
+//! binary data (MKI$, MKS$, MKD$, CVI, CVS, CVD), and user-defined functions (DEF FN).
 
 use crate::expr::{BinOp, Expr};
 use rand::Rng;
 use std::collections::HashMap;
+
+/// A user-defined function created with DEF FN.
+#[derive(Debug, Clone)]
+pub struct UserFunction {
+    pub params: Vec<String>,
+    pub body: Expr,
+}
 
 /// A work item on the evaluation stack. Each step is either an expression to
 /// evaluate or a pending operation waiting for its operands on the value stack.
@@ -94,6 +102,7 @@ impl std::fmt::Display for Value {
 /// Expression evaluator with a variable store and random number generator.
 pub struct Evaluator {
     pub variables: HashMap<String, Value>,
+    pub user_functions: HashMap<String, UserFunction>,
     rng: rand::rngs::ThreadRng,
 }
 
@@ -102,6 +111,7 @@ impl Evaluator {
     pub fn new() -> Self {
         Evaluator {
             variables: HashMap::new(),
+            user_functions: HashMap::new(),
             rng: rand::thread_rng(),
         }
     }
@@ -119,12 +129,18 @@ impl Evaluator {
                     Expr::Number(n) => values.push(Value::Number(*n)),
                     Expr::StringLiteral(s) => values.push(Value::String(s.clone())),
                     Expr::Variable(name) => {
-                        let val = self
-                            .variables
-                            .get(name)
-                            .cloned()
-                            .ok_or_else(|| format!("Undefined variable: {}", name))?;
-                        values.push(val);
+                        if let Some(val) = self.variables.get(name).cloned() {
+                            values.push(val);
+                        } else if let Some(func) = self.user_functions.get(name).cloned() {
+                            // Parameterless user-defined function called without parens
+                            if !func.params.is_empty() {
+                                return Err(format!("{} expects {} argument(s)", name, func.params.len()));
+                            }
+                            let result = self.eval_expr(&func.body)?;
+                            values.push(result);
+                        } else {
+                            return Err(format!("Undefined variable: {}", name));
+                        }
                     }
                     Expr::UnaryMinus(inner) => {
                         work.push(EvalStep::ApplyUnaryMinus);
@@ -221,11 +237,12 @@ impl Evaluator {
         Ok(result)
     }
 
-    /// Applies a built-in function to pre-evaluated argument values. Supported
-    /// functions include numeric functions (INT, ABS, SQR, RND), string functions
-    /// (LEN, LEFT$, RIGHT$, MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$,
-    /// STRING$, SPACE$, SPC, TAB), and binary data functions (MKI$, MKS$, MKD$,
-    /// CVI, CVS, CVD).
+    /// Applies a built-in or user-defined function to pre-evaluated argument values.
+    /// Supported built-in functions include numeric (INT, ABS, SQR, RND, EXP, LOG,
+    /// SGN, SIN, COS, TAN, ATN, FIX, CINT, CSNG, CDBL), string (LEN, LEFT$, RIGHT$,
+    /// MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$, STRING$, SPACE$, SPC, TAB),
+    /// and binary data (MKI$, MKS$, MKD$, CVI, CVS, CVD). Falls back to user-defined
+    /// functions registered via DEF FN.
     fn apply_function(&mut self, name: &str, args: &[Value]) -> Result<Value, String> {
         match name {
             "INT" => {
@@ -257,6 +274,85 @@ impl Evaluator {
                 // MS-BASIC RND returns a random float in [0.0, 1.0)
                 let val: f64 = self.rng.gen();
                 Ok(Value::Number(val))
+            }
+            "EXP" => {
+                if args.len() != 1 {
+                    return Err("EXP expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.exp()))
+            }
+            "LOG" => {
+                if args.len() != 1 {
+                    return Err("LOG expects 1 argument".to_string());
+                }
+                let x = args[0].as_number()?;
+                if x <= 0.0 {
+                    return Err("LOG requires a positive argument".to_string());
+                }
+                Ok(Value::Number(x.ln()))
+            }
+            "SGN" => {
+                if args.len() != 1 {
+                    return Err("SGN expects 1 argument".to_string());
+                }
+                let x = args[0].as_number()?;
+                let result = if x > 0.0 {
+                    1.0
+                } else if x < 0.0 {
+                    -1.0
+                } else {
+                    0.0
+                };
+                Ok(Value::Number(result))
+            }
+            "SIN" => {
+                if args.len() != 1 {
+                    return Err("SIN expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.sin()))
+            }
+            "COS" => {
+                if args.len() != 1 {
+                    return Err("COS expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.cos()))
+            }
+            "TAN" => {
+                if args.len() != 1 {
+                    return Err("TAN expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.tan()))
+            }
+            "ATN" => {
+                if args.len() != 1 {
+                    return Err("ATN expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.atan()))
+            }
+            "FIX" => {
+                if args.len() != 1 {
+                    return Err("FIX expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.trunc()))
+            }
+            "CINT" => {
+                if args.len() != 1 {
+                    return Err("CINT expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?.round()))
+            }
+            "CSNG" => {
+                if args.len() != 1 {
+                    return Err("CSNG expects 1 argument".to_string());
+                }
+                let x = args[0].as_number()?;
+                Ok(Value::Number((x as f32) as f64))
+            }
+            "CDBL" => {
+                if args.len() != 1 {
+                    return Err("CDBL expects 1 argument".to_string());
+                }
+                Ok(Value::Number(args[0].as_number()?))
             }
             "LEN" => {
                 if args.len() != 1 {
@@ -534,7 +630,45 @@ impl Evaluator {
                 Ok(Value::Number(n))
             }
 
-            _ => Err(format!("Unknown function: {}", name)),
+            _ => {
+                // Check for user-defined FN functions
+                if let Some(func) = self.user_functions.get(name).cloned() {
+                    if args.len() != func.params.len() {
+                        return Err(format!(
+                            "{} expects {} argument(s), got {}",
+                            name,
+                            func.params.len(),
+                            args.len()
+                        ));
+                    }
+                    // Save current values of parameter variables
+                    let saved: Vec<(String, Option<Value>)> = func
+                        .params
+                        .iter()
+                        .map(|p| (p.clone(), self.variables.get(p).cloned()))
+                        .collect();
+                    // Set parameter variables to argument values
+                    for (param, arg) in func.params.iter().zip(args.iter()) {
+                        self.variables.insert(param.clone(), arg.clone());
+                    }
+                    // Evaluate the function body
+                    let result = self.eval_expr(&func.body);
+                    // Restore saved values
+                    for (param, saved_val) in saved {
+                        match saved_val {
+                            Some(v) => {
+                                self.variables.insert(param, v);
+                            }
+                            None => {
+                                self.variables.remove(&param);
+                            }
+                        }
+                    }
+                    result
+                } else {
+                    Err(format!("Unknown function: {}", name))
+                }
+            }
         }
     }
 }
@@ -551,6 +685,14 @@ mod tests {
         let expr = parser.parse_expression().unwrap();
         let mut evaluator = Evaluator::new();
         evaluator.eval_expr(&expr).unwrap()
+    }
+
+    fn eval_err(input: &str) -> String {
+        let tokens = Lexer::new(input).tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        evaluator.eval_expr(&expr).unwrap_err()
     }
 
     fn eval_with_vars(input: &str, vars: Vec<(&str, Value)>) -> Value {
@@ -2152,5 +2294,244 @@ mod tests {
     #[test]
     fn test_eval_str_negative_float() {
         assert_eq!(eval("STR$(-3.14)"), Value::String("-3.14".to_string()));
+    }
+
+    // --- EXP function tests ---
+
+    #[test]
+    fn test_eval_exp_zero() {
+        assert_eq!(eval("EXP(0)"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_exp_one() {
+        if let Value::Number(n) = eval("EXP(1)") {
+            assert!((n - std::f64::consts::E).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_exp_wrong_arg_count() {
+        assert!(eval_err("EXP(1, 2)").contains("EXP expects 1 argument"));
+    }
+
+    // --- LOG function tests ---
+
+    #[test]
+    fn test_eval_log_one() {
+        assert_eq!(eval("LOG(1)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_log_e() {
+        if let Value::Number(n) = eval("LOG(2.718281828459045)") {
+            assert!((n - 1.0).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_log_negative_error() {
+        assert!(eval_err("LOG(-1)").contains("LOG requires a positive argument"));
+    }
+
+    #[test]
+    fn test_eval_log_zero_error() {
+        assert!(eval_err("LOG(0)").contains("LOG requires a positive argument"));
+    }
+
+    #[test]
+    fn test_eval_log_wrong_arg_count() {
+        assert!(eval_err("LOG(1, 2)").contains("LOG expects 1 argument"));
+    }
+
+    // --- SGN function tests ---
+
+    #[test]
+    fn test_eval_sgn_positive() {
+        assert_eq!(eval("SGN(42)"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_sgn_negative() {
+        assert_eq!(eval("SGN(-5)"), Value::Number(-1.0));
+    }
+
+    #[test]
+    fn test_eval_sgn_zero() {
+        assert_eq!(eval("SGN(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_sgn_wrong_arg_count() {
+        assert!(eval_err("SGN(1, 2)").contains("SGN expects 1 argument"));
+    }
+
+    // --- SIN function tests ---
+
+    #[test]
+    fn test_eval_sin_zero() {
+        assert_eq!(eval("SIN(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_sin_pi_half() {
+        if let Value::Number(n) = eval("SIN(1.5707963267948966)") {
+            assert!((n - 1.0).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_sin_wrong_arg_count() {
+        assert!(eval_err("SIN(1, 2)").contains("SIN expects 1 argument"));
+    }
+
+    // --- COS function tests ---
+
+    #[test]
+    fn test_eval_cos_zero() {
+        assert_eq!(eval("COS(0)"), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_eval_cos_pi() {
+        if let Value::Number(n) = eval("COS(3.141592653589793)") {
+            assert!((n - (-1.0)).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_cos_wrong_arg_count() {
+        assert!(eval_err("COS(1, 2)").contains("COS expects 1 argument"));
+    }
+
+    // --- TAN function tests ---
+
+    #[test]
+    fn test_eval_tan_zero() {
+        assert_eq!(eval("TAN(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_tan_wrong_arg_count() {
+        assert!(eval_err("TAN(1, 2)").contains("TAN expects 1 argument"));
+    }
+
+    // --- ATN function tests ---
+
+    #[test]
+    fn test_eval_atn_zero() {
+        assert_eq!(eval("ATN(0)"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_atn_one() {
+        if let Value::Number(n) = eval("ATN(1)") {
+            assert!((n - std::f64::consts::FRAC_PI_4).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_atn_wrong_arg_count() {
+        assert!(eval_err("ATN(1, 2)").contains("ATN expects 1 argument"));
+    }
+
+    // --- FIX function tests ---
+
+    #[test]
+    fn test_eval_fix_positive() {
+        assert_eq!(eval("FIX(3.7)"), Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_eval_fix_negative() {
+        assert_eq!(eval("FIX(-3.7)"), Value::Number(-3.0));
+    }
+
+    #[test]
+    fn test_eval_fix_wrong_arg_count() {
+        assert!(eval_err("FIX(1, 2)").contains("FIX expects 1 argument"));
+    }
+
+    // --- CINT function tests ---
+
+    #[test]
+    fn test_eval_cint_round_up() {
+        assert_eq!(eval("CINT(3.6)"), Value::Number(4.0));
+    }
+
+    #[test]
+    fn test_eval_cint_round_down() {
+        assert_eq!(eval("CINT(3.2)"), Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_eval_cint_negative() {
+        assert_eq!(eval("CINT(-3.6)"), Value::Number(-4.0));
+    }
+
+    #[test]
+    fn test_eval_cint_wrong_arg_count() {
+        assert!(eval_err("CINT(1, 2)").contains("CINT expects 1 argument"));
+    }
+
+    // --- CSNG function tests ---
+
+    #[test]
+    fn test_eval_csng_basic() {
+        if let Value::Number(n) = eval("CSNG(3.14)") {
+            assert!((n - 3.14).abs() < 0.001);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    #[test]
+    fn test_eval_csng_wrong_arg_count() {
+        assert!(eval_err("CSNG(1, 2)").contains("CSNG expects 1 argument"));
+    }
+
+    // --- CDBL function tests ---
+
+    #[test]
+    fn test_eval_cdbl_basic() {
+        assert_eq!(eval("CDBL(3.14)"), Value::Number(3.14));
+    }
+
+    #[test]
+    fn test_eval_cdbl_wrong_arg_count() {
+        assert!(eval_err("CDBL(1, 2)").contains("CDBL expects 1 argument"));
+    }
+
+    // --- EXP/LOG roundtrip ---
+
+    #[test]
+    fn test_eval_exp_log_roundtrip() {
+        if let Value::Number(n) = eval("LOG(EXP(5))") {
+            assert!((n - 5.0).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
+    }
+
+    // --- SIN/ATN identity ---
+
+    #[test]
+    fn test_eval_sin_atn_identity() {
+        // TAN(ATN(1)) should equal 1
+        if let Value::Number(n) = eval("TAN(ATN(1))") {
+            assert!((n - 1.0).abs() < 1e-10);
+        } else {
+            panic!("Expected number");
+        }
     }
 }

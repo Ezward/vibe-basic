@@ -7,7 +7,7 @@
 //! conventions (14-character tab zones for commas, newline suppression with semicolons).
 
 use crate::ast::{PrintItem, Program, Statement, ThenClause};
-use crate::eval::{Evaluator, Value};
+use crate::eval::{Evaluator, UserFunction, Value};
 use std::io::{BufRead, Write};
 
 /// Tracks the state of an active FOR loop on the loop stack.
@@ -235,6 +235,16 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     }
                     Ok(StmtResult::Continue)
                 }
+            }
+            Statement::DefFn { name, params, body } => {
+                self.evaluator.user_functions.insert(
+                    name.clone(),
+                    UserFunction {
+                        params: params.clone(),
+                        body: body.clone(),
+                    },
+                );
+                Ok(StmtResult::Continue)
             }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
@@ -1171,5 +1181,251 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "HEX:2A\nOCT:52\n");
+    }
+
+    // --- Math function integration tests ---
+
+    #[test]
+    fn test_exp_function() {
+        let output = run_program("10 PRINT EXP(0)\n20 END\n").unwrap();
+        assert_eq!(output, " 1 \n");
+    }
+
+    #[test]
+    fn test_log_function() {
+        let output = run_program("10 PRINT LOG(1)\n20 END\n").unwrap();
+        assert_eq!(output, " 0 \n");
+    }
+
+    #[test]
+    fn test_sgn_function() {
+        let output = run_program(
+            "\
+10 PRINT SGN(5); SGN(-3); SGN(0)
+20 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1 -1  0 \n");
+    }
+
+    #[test]
+    fn test_sin_cos_function() {
+        let output = run_program("10 PRINT SIN(0); COS(0)\n20 END\n").unwrap();
+        assert_eq!(output, " 0  1 \n");
+    }
+
+    #[test]
+    fn test_tan_function() {
+        let output = run_program("10 PRINT TAN(0)\n20 END\n").unwrap();
+        assert_eq!(output, " 0 \n");
+    }
+
+    #[test]
+    fn test_atn_function() {
+        let output = run_program("10 PRINT ATN(0)\n20 END\n").unwrap();
+        assert_eq!(output, " 0 \n");
+    }
+
+    #[test]
+    fn test_fix_function() {
+        let output = run_program("10 PRINT FIX(3.7); FIX(-3.7)\n20 END\n").unwrap();
+        assert_eq!(output, " 3 -3 \n");
+    }
+
+    #[test]
+    fn test_cint_function() {
+        let output = run_program("10 PRINT CINT(3.6); CINT(3.2)\n20 END\n").unwrap();
+        assert_eq!(output, " 4  3 \n");
+    }
+
+    #[test]
+    fn test_csng_function() {
+        let output = run_program("10 PRINT CSNG(42)\n20 END\n").unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_cdbl_function() {
+        let output = run_program("10 PRINT CDBL(42)\n20 END\n").unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_int_vs_fix_negative() {
+        // INT rounds toward -infinity, FIX truncates toward zero
+        let output = run_program("10 PRINT INT(-3.7); FIX(-3.7)\n20 END\n").unwrap();
+        assert_eq!(output, "-4 -3 \n");
+    }
+
+    // --- DEF FN integration tests ---
+
+    #[test]
+    fn test_def_fn_simple() {
+        let output = run_program(
+            "\
+10 DEF FNMUL(A, B) = A * B
+20 PRINT FNMUL(10, 5)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 50 \n");
+    }
+
+    #[test]
+    fn test_def_fn_no_params() {
+        let output = run_program(
+            "\
+10 DEF FNPI = 3.14159
+20 PRINT FNPI
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 3.14159 \n");
+    }
+
+    #[test]
+    fn test_def_fn_with_global_var() {
+        let output = run_program(
+            "\
+10 DEF FNADD(X) = X + BASE
+20 BASE = 100
+30 PRINT FNADD(5)
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 105 \n");
+    }
+
+    #[test]
+    fn test_def_fn_params_are_local() {
+        let output = run_program(
+            "\
+10 DEF FNSQR(X) = X * X
+20 X = 99
+30 PRINT FNSQR(5)
+40 PRINT X
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 25 \n 99 \n");
+    }
+
+    #[test]
+    fn test_def_fn_with_space() {
+        // DEF FN MUL(A, B) with space between FN and name
+        let output = run_program(
+            "\
+10 DEF FN MUL(A, B) = A * B
+20 PRINT FN MUL(3, 4)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 12 \n");
+    }
+
+    #[test]
+    fn test_def_fn_in_expression() {
+        let output = run_program(
+            "\
+10 DEF FNDBL(X) = X * 2
+20 PRINT FNDBL(3) + FNDBL(4)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 14 \n");
+    }
+
+    #[test]
+    fn test_def_fn_string() {
+        let output = run_program(
+            "\
+10 DEF FNGET$(X$) = LEFT$(X$, 1)
+20 PRINT FNGET$(\"HELLO\")
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "H\n");
+    }
+
+    #[test]
+    fn test_def_fn_wrong_arg_count() {
+        let result = run_program(
+            "\
+10 DEF FNADD(A, B) = A + B
+20 PRINT FNADD(1)
+30 END
+",
+        );
+        assert!(result.is_err());
+    }
+
+    // --- Trig identity test ---
+
+    #[test]
+    fn test_trig_identity_sin_sq_cos_sq() {
+        // SIN(x)^2 + COS(x)^2 = 1 for any x
+        let output = run_program(
+            "\
+10 X = 1.234
+20 S = SIN(X) ^ 2 + COS(X) ^ 2
+30 PRINT CINT(S)
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1 \n");
+    }
+
+    // --- Derived formula: inverse sine ---
+
+    #[test]
+    fn test_derived_inverse_sine() {
+        // Inverse Sine using ATN: ATN(X / SQR(-X * X + 1))
+        let output = run_program(
+            "\
+10 X = 0.5
+20 ASINE = ATN(X / SQR(-X * X + 1))
+30 PRINT CINT(SIN(ASINE) * 1000)
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 500 \n");
+    }
+
+    #[test]
+    fn test_def_fn_bare_fn_no_name() {
+        // DEF FN = expr (bare FN with no name, parameterless)
+        let output = run_program(
+            "\
+10 DEF FN = 42
+20 PRINT FN
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_def_fn_parameterless_called_as_variable_with_params_error() {
+        // Define a function with params, then reference it without parens
+        let result = run_program(
+            "\
+10 DEF FNADD(A, B) = A + B
+20 X = FNADD
+30 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expects 2 argument(s)"));
     }
 }

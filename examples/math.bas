@@ -1,0 +1,102 @@
+10 REM =============================================
+20 REM  MATH FUNCTIONS AND DEF FN DEMO
+30 REM =============================================
+40 PRINT
+50 PRINT "=== GENERAL MATH FUNCTIONS ==="
+60 PRINT "ABS(-7)    ="; ABS(-7)
+70 PRINT "ABS(3.5)   ="; ABS(3.5)
+80 PRINT "SGN(-42)   ="; SGN(-42)
+90 PRINT "SGN(0)     ="; SGN(0)
+100 PRINT "SGN(99)   ="; SGN(99)
+110 PRINT "SQR(144)  ="; SQR(144)
+120 PRINT "EXP(0)    ="; EXP(0)
+130 PRINT "EXP(1)    ="; EXP(1)
+140 PRINT "LOG(1)    ="; LOG(1)
+150 PRINT "LOG(EXP(3)) ="; LOG(EXP(3))
+160 PRINT "RND(1)    ="; RND(1)
+170 PRINT
+180 PRINT "=== TRIGONOMETRIC FUNCTIONS ==="
+190 DEF FNRAD(D) = D * 3.14159265358979 / 180
+200 PRINT "SIN(0)    ="; SIN(0)
+210 PRINT "SIN(PI/2) ="; SIN(FNRAD(90))
+220 PRINT "COS(0)    ="; COS(0)
+230 PRINT "COS(PI)   ="; COS(FNRAD(180))
+240 PRINT "TAN(0)    ="; TAN(0)
+250 PRINT "TAN(PI/4) ="; TAN(FNRAD(45))
+260 PRINT "ATN(0)    ="; ATN(0)
+270 PRINT "ATN(1)    ="; ATN(1)
+280 PRINT
+290 REM Verify trig identity: SIN(x)^2 + COS(x)^2 = 1
+300 X = FNRAD(37)
+310 S = SIN(X) ^ 2 + COS(X) ^ 2
+320 PRINT "SIN(37d)^2 + COS(37d)^2 ="; S
+330 PRINT
+340 PRINT "=== ROUNDING / CONVERSION FUNCTIONS ==="
+350 PRINT "INT(3.7)   ="; INT(3.7)
+360 PRINT "INT(-3.7)  ="; INT(-3.7)
+370 PRINT "FIX(3.7)   ="; FIX(3.7)
+380 PRINT "FIX(-3.7)  ="; FIX(-3.7)
+390 PRINT "CINT(2.5)  ="; CINT(2.5)
+400 PRINT "CINT(3.5)  ="; CINT(3.5)
+410 PRINT "CINT(-2.5) ="; CINT(-2.5)
+420 PRINT "CSNG(3.14) ="; CSNG(3.14)
+430 PRINT "CDBL(2.72) ="; CDBL(2.72)
+440 PRINT
+450 REM Show the difference between INT and FIX for negative numbers
+460 PRINT "INT rounds toward -infinity, FIX truncates toward zero:"
+470 PRINT "  INT(-5.3)="; INT(-5.3); "  FIX(-5.3)="; FIX(-5.3)
+480 PRINT
+490 PRINT "=== DEF FN (USER-DEFINED FUNCTIONS) ==="
+500 REM Simple arithmetic functions
+510 DEF FNADD(A, B) = A + B
+520 DEF FNMUL(A, B) = A * B
+530 PRINT "FNADD(10, 25) ="; FNADD(10, 25)
+540 PRINT "FNMUL(6, 7)   ="; FNMUL(6, 7)
+550 PRINT
+560 REM Parameterless constant function
+570 DEF FNPI = 3.14159265358979
+580 PRINT "FNPI ="; FNPI
+590 PRINT
+600 REM Function using global variable
+610 DEF FNSCALE(X) = X * FACTOR
+620 FACTOR = 10
+630 PRINT "FNSCALE(5) with FACTOR=10:"; FNSCALE(5)
+640 FACTOR = 100
+650 PRINT "FNSCALE(5) with FACTOR=100:"; FNSCALE(5)
+660 PRINT
+670 REM Verify that parameters are local
+680 X = 999
+690 DEF FNSQUARE(X) = X * X
+700 PRINT "FNSQUARE(7) ="; FNSQUARE(7)
+710 PRINT "X is still  ="; X
+720 PRINT
+730 REM String function with DEF FN
+740 DEF FNFIRST$(S$) = LEFT$(S$, 1)
+750 PRINT "FNFIRST$(""HELLO"") ="; FNFIRST$("HELLO")
+760 PRINT
+770 REM Derived math formulas using DEF FN
+780 DEF FNSEC(X) = 1 / COS(X)
+790 DEF FNCSC(X) = 1 / SIN(X)
+800 DEF FNCOT(X) = 1 / TAN(X)
+810 DEF FNASN(X) = ATN(X / SQR(-X * X + 1))
+820 PRINT "=== DERIVED FORMULAS VIA DEF FN ==="
+830 A = FNRAD(60)
+840 PRINT "SEC(60d)   ="; FNSEC(A)
+850 PRINT "CSC(60d)   ="; FNCSC(A)
+860 PRINT "COT(60d)   ="; FNCOT(A)
+870 PRINT "ARCSIN(0.5) in degrees ="; FNASN(0.5) * 180 / FNPI
+880 PRINT
+890 REM A compound example: hypotenuse using DEF FN and SQR
+900 DEF FNHYP(A, B) = SQR(A * A + B * B)
+910 PRINT "=== HYPOTENUSE ==="
+920 PRINT "FNHYP(3, 4) ="; FNHYP(3, 4)
+930 PRINT "FNHYP(5, 12) ="; FNHYP(5, 12)
+940 PRINT
+950 REM Use several functions together in a loop
+960 PRINT "=== TABLE: N, SQR(N), LOG(N), EXP(1/N) ==="
+970 FOR N = 1 TO 5
+980   PRINT N; SQR(N); LOG(N); EXP(1 / N)
+990 NEXT N
+1000 PRINT
+1010 PRINT "DONE."
+1020 END

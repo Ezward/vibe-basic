@@ -43,6 +43,11 @@ pub enum Statement {
     },
     Rem(String),
     End,
+    DefFn {
+        name: String,
+        params: Vec<String>,
+        body: Expr,
+    },
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -251,6 +256,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Statement::End)
             }
+            Token::Def => {
+                self.advance();
+                self.parse_def_fn()
+            }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
                 self.parse_let_body()
@@ -386,6 +395,56 @@ impl<'a> Parser<'a> {
             start,
             end,
             step,
+        })
+    }
+
+    /// Parses a DEF FN statement: `DEF FN<name>[(<params>)] = <expression>`.
+    /// The function name is stored as "FN<name>" to match how it will be called.
+    fn parse_def_fn(&mut self) -> Result<Statement, String> {
+        // Expect an identifier starting with "FN" (e.g., FNMUL or FN followed by MUL)
+        let fn_name_raw = self.expect_identifier()?;
+        let fn_name = if fn_name_raw == "FN" {
+            // "DEF FN MUL" case - FN and name are separate tokens
+            // Next could be an identifier (the name) or a paren-less function
+            if let Token::Identifier(_) = self.peek() {
+                let suffix = self.expect_identifier()?;
+                format!("FN{}", suffix)
+            } else {
+                // Parameterless: DEF FN = expr (just "FN" as the name)
+                "FN".to_string()
+            }
+        } else if fn_name_raw.starts_with("FN") {
+            // "DEF FNMUL" case - already concatenated
+            fn_name_raw
+        } else {
+            return Err(self.error_with_context(format!("Expected FN<name> after DEF, got {}", fn_name_raw)));
+        };
+        // Parse optional parameter list
+        let mut params = Vec::new();
+        if *self.peek() == Token::LeftParen {
+            self.advance();
+            if *self.peek() != Token::RightParen {
+                params.push(self.expect_identifier()?);
+                while *self.peek() == Token::Comma {
+                    self.advance();
+                    params.push(self.expect_identifier()?);
+                }
+            }
+            if *self.peek() != Token::RightParen {
+                return Err(self.error_with_context("Expected ')' after DEF FN parameter list".to_string()));
+            }
+            self.advance();
+        }
+        // Expect '='
+        if *self.peek() != Token::Equal {
+            return Err(self.error_with_context(format!("Expected '=' in DEF FN, got {:?}", self.peek())));
+        }
+        self.advance();
+        let body = self.parse_expression()?;
+        Ok(Statement::DefFn {
+            name: fn_name,
+            params,
+            body,
         })
     }
 }
@@ -899,5 +958,82 @@ mod tests {
     fn test_parse_error_expected_identifier() {
         let err = parse_program_err("10 LET 42 = 5");
         assert!(err.contains("Expected identifier"));
+    }
+
+    #[test]
+    fn test_parse_def_fn_with_params() {
+        let stmt = parse_single_statement("10 DEF FNMUL(A, B) = A * B");
+        assert!(matches!(stmt, Statement::DefFn { .. }));
+        if let Statement::DefFn { name, params, body } = stmt {
+            assert_eq!(name, "FNMUL");
+            assert_eq!(params, vec!["A", "B"]);
+            assert_eq!(
+                body,
+                Expr::BinaryOp {
+                    op: BinOp::Mul,
+                    left: Box::new(Expr::Variable("A".to_string())),
+                    right: Box::new(Expr::Variable("B".to_string())),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_def_fn_no_params() {
+        let stmt = parse_single_statement("10 DEF FNPI = 3.14");
+        assert!(matches!(stmt, Statement::DefFn { .. }));
+        if let Statement::DefFn { name, params, .. } = stmt {
+            assert_eq!(name, "FNPI");
+            assert!(params.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_parse_def_fn_space_separated() {
+        let stmt = parse_single_statement("10 DEF FN MUL(A, B) = A * B");
+        assert!(matches!(stmt, Statement::DefFn { .. }));
+        if let Statement::DefFn { name, params, .. } = stmt {
+            assert_eq!(name, "FNMUL");
+            assert_eq!(params, vec!["A", "B"]);
+        }
+    }
+
+    #[test]
+    fn test_parse_def_fn_error_not_fn() {
+        let err = parse_program_err("10 DEF MUL(A) = A");
+        assert!(err.contains("Expected FN<name> after DEF"));
+    }
+
+    #[test]
+    fn test_parse_def_fn_error_missing_equal() {
+        let err = parse_program_err("10 DEF FNMUL(A, B) A * B");
+        assert!(err.contains("Expected '=' in DEF FN"));
+    }
+
+    #[test]
+    fn test_parse_def_fn_string_function() {
+        let stmt = parse_single_statement("10 DEF FNGET$(X$) = LEFT$(X$, 1)");
+        assert!(matches!(stmt, Statement::DefFn { .. }));
+        if let Statement::DefFn { name, params, .. } = stmt {
+            assert_eq!(name, "FNGET$");
+            assert_eq!(params, vec!["X$"]);
+        }
+    }
+
+    #[test]
+    fn test_parse_def_fn_error_missing_rparen() {
+        let err = parse_program_err("10 DEF FNMUL(A, B = A * B");
+        assert!(err.contains("Expected ')' after DEF FN parameter list"));
+    }
+
+    #[test]
+    fn test_parse_def_fn_bare_fn() {
+        // DEF FN = expr (bare FN, no suffix name)
+        let stmt = parse_single_statement("10 DEF FN = 42");
+        assert!(matches!(stmt, Statement::DefFn { .. }));
+        if let Statement::DefFn { name, params, .. } = stmt {
+            assert_eq!(name, "FN");
+            assert!(params.is_empty());
+        }
     }
 }

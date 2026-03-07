@@ -248,6 +248,17 @@ impl<'a> ExprParser<'a> {
             }
             Token::Identifier(name) => {
                 self.advance();
+                // Handle "FN NAME(...)" syntax: combine FN prefix with next identifier
+                let name = if name == "FN" {
+                    if let Token::Identifier(suffix) = self.peek().clone() {
+                        self.advance();
+                        format!("FN{}", suffix)
+                    } else {
+                        name
+                    }
+                } else {
+                    name
+                };
                 // Check if it's a function call
                 if *self.peek() == Token::LeftParen {
                     self.advance();

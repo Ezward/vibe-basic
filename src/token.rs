@@ -28,6 +28,7 @@ pub enum Token {
     Next,
     Rem(String),
     End,
+    Def,
     // Logical operators
     And,
     Or,
@@ -173,6 +174,7 @@ impl Lexer {
             "STEP" => Token::Step,
             "NEXT" => Token::Next,
             "END" => Token::End,
+            "DEF" => Token::Def,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
