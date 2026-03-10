@@ -685,6 +685,32 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_string_with_single_quotes() {
+        let tokens = Lexer::new("\"DON'T STOP\"").tokenize();
+        assert_eq!(tokens, vec![Token::StringLiteral("DON'T STOP".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_string_with_single_quote_in_print() {
+        let tokens = Lexer::new("10 PRINT \"IT'S A TEST\"").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Print,
+                Token::StringLiteral("IT'S A TEST".to_string()),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_string_with_multiple_single_quotes() {
+        let tokens = Lexer::new("\"A'B'C'D\"").tokenize();
+        assert_eq!(tokens, vec![Token::StringLiteral("A'B'C'D".to_string()), Token::Eof]);
+    }
+
+    #[test]
     fn test_tokenize_data_statement() {
         let tokens = Lexer::new("DATA 10, 20, \"HELLO\"").tokenize();
         assert_eq!(
