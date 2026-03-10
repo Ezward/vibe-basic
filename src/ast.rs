@@ -33,6 +33,7 @@ pub enum Statement {
         prompt: Option<String>,
         variable: String,
         indices: Vec<Expr>,
+        suppress_question_mark: bool,
     },
     For {
         variable: String,
@@ -411,11 +412,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses an INPUT statement: `INPUT ["prompt";] variable[(subscripts)]`.
+    /// Parses an INPUT statement: `INPUT ["prompt" (";" | ",")] variable[(subscripts)]`.
+    ///
+    /// When a semicolon separates the prompt from the variable, a "? " is appended
+    /// to the prompt at runtime (GW-BASIC default). When a comma is used instead,
+    /// the question mark is suppressed.
     fn parse_input(&mut self) -> Result<Statement, String> {
-        // INPUT [string ";"] variable[(subscripts)]
+        // INPUT [string (";" | ",")] variable[(subscripts)]
         let prompt;
         let variable;
+        let suppress_question_mark;
 
         match self.peek().clone() {
             Token::StringLiteral(s) => {
@@ -423,14 +429,20 @@ impl<'a> Parser<'a> {
                 if *self.peek() == Token::Semicolon {
                     self.advance();
                     prompt = Some(s);
+                    suppress_question_mark = false;
+                    variable = self.expect_identifier()?;
+                } else if *self.peek() == Token::Comma {
+                    self.advance();
+                    prompt = Some(s);
+                    suppress_question_mark = true;
                     variable = self.expect_identifier()?;
                 } else {
-                    // This shouldn't happen in valid BASIC, but handle gracefully
-                    return Err(self.error_with_context("Expected ';' after INPUT prompt string".to_string()));
+                    return Err(self.error_with_context("Expected ';' or ',' after INPUT prompt string".to_string()));
                 }
             }
             Token::Identifier(_) => {
                 prompt = None;
+                suppress_question_mark = false;
                 variable = self.expect_identifier()?;
             }
             ref tok => {
@@ -444,6 +456,7 @@ impl<'a> Parser<'a> {
             prompt,
             variable,
             indices,
+            suppress_question_mark,
         })
     }
 
@@ -857,6 +870,7 @@ mod tests {
                 prompt: None,
                 variable: "N$".to_string(),
                 indices: vec![],
+                suppress_question_mark: false,
             }
         );
     }
@@ -870,6 +884,35 @@ mod tests {
                 prompt: Some("GUESS (1-10): ".to_string()),
                 variable: "G".to_string(),
                 indices: vec![],
+                suppress_question_mark: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_with_prompt_comma() {
+        let stmt = parse_single_statement("20 INPUT \"ENTER VALUE: \", G");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("ENTER VALUE: ".to_string()),
+                variable: "G".to_string(),
+                indices: vec![],
+                suppress_question_mark: true,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_comma_string_variable() {
+        let stmt = parse_single_statement("10 INPUT \"NAME\", N$");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("NAME".to_string()),
+                variable: "N$".to_string(),
+                indices: vec![],
+                suppress_question_mark: true,
             }
         );
     }
@@ -1143,9 +1186,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_input_missing_semicolon() {
+    fn test_parse_error_input_missing_separator() {
         let err = parse_program_err("10 INPUT \"PROMPT\" X");
-        assert!(err.contains("Expected ';' after INPUT prompt string"));
+        assert!(err.contains("Expected ';' or ',' after INPUT prompt string"));
     }
 
     #[test]

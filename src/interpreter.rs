@@ -219,8 +219,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 prompt,
                 variable,
                 indices,
+                suppress_question_mark,
             } => {
-                self.execute_input(prompt.as_deref(), variable, indices)?;
+                self.execute_input(prompt.as_deref(), variable, indices, *suppress_question_mark)?;
                 Ok(StmtResult::Continue)
             }
             Statement::For {
@@ -472,19 +473,25 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         Ok(())
     }
 
-    /// Executes an INPUT statement: prints an optional prompt and "? ", reads a line,
+    /// Executes an INPUT statement: prints an optional prompt, reads a line,
     /// and stores it as a string (for $ variables) or parses it as a number.
     /// Supports both scalar variables and array elements.
+    ///
+    /// When `suppress_question_mark` is false (semicolon separator), a "? " is appended
+    /// after any prompt. When true (comma separator), the question mark is suppressed.
     fn execute_input(
         &mut self,
         prompt: Option<&str>,
         variable: &str,
         indices: &[crate::expr::Expr],
+        suppress_question_mark: bool,
     ) -> Result<(), String> {
         if let Some(p) = prompt {
             write!(self.output, "{}", p).map_err(|e| e.to_string())?;
         }
-        write!(self.output, "? ").map_err(|e| e.to_string())?;
+        if !suppress_question_mark {
+            write!(self.output, "? ").map_err(|e| e.to_string())?;
+        }
         self.output.flush().map_err(|e| e.to_string())?;
 
         let mut line = String::new();
@@ -685,6 +692,24 @@ mod tests {
     fn test_input_numeric() {
         let output = run_program_with_input("10 INPUT G\n20 PRINT G * 2\n30 END\n", "5\n").unwrap();
         assert_eq!(output, "?  10 \n");
+    }
+
+    #[test]
+    fn test_input_with_prompt_comma_suppresses_question_mark() {
+        let output = run_program_with_input("10 INPUT \"NAME: \", N$\n20 PRINT N$\n30 END\n", "BOB\n").unwrap();
+        assert_eq!(output, "NAME: BOB\n");
+    }
+
+    #[test]
+    fn test_input_with_prompt_semicolon_shows_question_mark() {
+        let output = run_program_with_input("10 INPUT \"NAME: \"; N$\n20 PRINT N$\n30 END\n", "BOB\n").unwrap();
+        assert_eq!(output, "NAME: ? BOB\n");
+    }
+
+    #[test]
+    fn test_input_comma_numeric() {
+        let output = run_program_with_input("10 INPUT \"VALUE\", G\n20 PRINT G + 1\n30 END\n", "7\n").unwrap();
+        assert_eq!(output, "VALUE 8 \n");
     }
 
     #[test]

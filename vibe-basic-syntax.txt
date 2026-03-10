@@ -23,7 +23,7 @@ print_stmt      = "PRINT" [ print_list ] ;
 if_stmt         = "IF" expression "THEN" then_clause [ "ELSE" then_clause ] ;
 then_clause     = line_number | statement ;
 goto_stmt       = "GOTO" line_number ;
-input_stmt      = "INPUT" [ string_literal ";" ] variable ;
+input_stmt      = "INPUT" [ string_literal ( ";" | "," ) ] variable ;
 for_stmt        = "FOR" variable "=" expression "TO" expression
                   [ "STEP" expression ] ;
 next_stmt       = "NEXT" [ variable ] ;
@@ -88,7 +88,9 @@ II. SEMANTIC EXPLANATIONS
 3. INPUT (Data Entry)
    Action: Pauses the program and displays a "? " prompt. It waits for the user
    to type a value and press ENTER before assigning that value to the variable.
-   An optional prompt string followed by ";" may precede the variable name.
+   An optional prompt string followed by ";" or "," may precede the variable name.
+   When a semicolon is used, a "? " is automatically appended to the prompt.
+   When a comma is used, the question mark is suppressed.
    String variables (ending with $) receive the input as a string; numeric
    variables attempt to parse the input as a number.
 
