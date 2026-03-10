@@ -33,9 +33,19 @@ pub struct Interpreter<R: BufRead, W: Write> {
     pub(crate) input: R,
     pub(crate) output: W,
     for_stack: Vec<ForState>,
+    pub(crate) gosub_stack: Vec<GosubReturn>,
     column: usize,
     data_pool: Vec<DataEntry>,
     data_pointer: usize,
+}
+
+/// Tracks the return address for a GOSUB call.
+#[derive(Debug, Clone)]
+pub(crate) struct GosubReturn {
+    /// Index of the line to return to after RETURN
+    pub(crate) line_index: usize,
+    /// Index of the statement within that line to resume at
+    pub(crate) stmt_index: usize,
 }
 
 impl<R: BufRead, W: Write> Interpreter<R, W> {
@@ -46,6 +56,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             input,
             output,
             for_stack: Vec::new(),
+            gosub_stack: Vec::new(),
             column: 0,
             data_pool: Vec::new(),
             data_pointer: 0,
@@ -62,10 +73,12 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
         self.collect_data(program)?;
         let mut line_idx = 0;
+        let mut start_stmt_idx = 0;
 
         while line_idx < program.lines.len() {
             let line = &program.lines[line_idx];
-            let mut stmt_idx = 0;
+            let mut stmt_idx = start_stmt_idx;
+            start_stmt_idx = 0;
             let mut next_line_idx = line_idx + 1;
 
             while stmt_idx < line.statements.len() {
@@ -91,6 +104,36 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                                 .unwrap_or("<unknown>");
                             format!("{}\n  at line {}: {}", e, line.source_line, source_text)
                         })?;
+                        break;
+                    }
+                    StmtResult::Gosub(target_line) => {
+                        // Push return address: next statement on this line, or next line
+                        let return_addr = if stmt_idx + 1 < line.statements.len() {
+                            GosubReturn {
+                                line_index: line_idx,
+                                stmt_index: stmt_idx + 1,
+                            }
+                        } else {
+                            GosubReturn {
+                                line_index: line_idx + 1,
+                                stmt_index: 0,
+                            }
+                        };
+                        self.gosub_stack.push(return_addr);
+                        next_line_idx = self.find_line_index(program, target_line).map_err(|e| {
+                            let source_text = program
+                                .source_lines
+                                .get(line.source_line - 1)
+                                .map(|s| s.as_str())
+                                .unwrap_or("<unknown>");
+                            format!("{}\n  at line {}: {}", e, line.source_line, source_text)
+                        })?;
+                        break;
+                    }
+                    StmtResult::Return => {
+                        let ret = self.gosub_stack.pop().unwrap();
+                        next_line_idx = ret.line_index;
+                        start_stmt_idx = ret.stmt_index;
                         break;
                     }
                     StmtResult::End => return Ok(()),
@@ -351,6 +394,17 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 }
                 Ok(StmtResult::Continue)
             }
+            Statement::Gosub { target } => {
+                let val = self.evaluator.eval_expr(target)?;
+                let line_num = val.as_number()? as u32;
+                Ok(StmtResult::Gosub(line_num))
+            }
+            Statement::Return => {
+                if self.gosub_stack.is_empty() {
+                    return Err("RETURN without GOSUB".to_string());
+                }
+                Ok(StmtResult::Return)
+            }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
         }
@@ -489,6 +543,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 pub(crate) enum StmtResult {
     Continue,
     Goto(u32),
+    Gosub(u32),
+    Return,
     End,
     SkipLine,
     ForLoopSkip(usize),
@@ -2067,5 +2123,171 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, " 99 \n");
+    }
+
+    #[test]
+    fn test_gosub_return_basic() {
+        let output = run_program(
+            "\
+10 PRINT \"BEFORE\"
+20 GOSUB 100
+30 PRINT \"AFTER\"
+40 END
+100 PRINT \"IN SUB\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "BEFORE\nIN SUB\nAFTER\n");
+    }
+
+    #[test]
+    fn test_gosub_return_multiple_calls() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 GOSUB 100
+30 END
+100 PRINT \"SUB\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\nSUB\n");
+    }
+
+    #[test]
+    fn test_gosub_nested() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 END
+100 PRINT \"OUTER\"
+110 GOSUB 200
+120 PRINT \"OUTER DONE\"
+130 RETURN
+200 PRINT \"INNER\"
+210 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "OUTER\nINNER\nOUTER DONE\n");
+    }
+
+    #[test]
+    fn test_gosub_with_variables() {
+        let output = run_program(
+            "\
+10 X = 5
+20 GOSUB 100
+30 PRINT X
+40 END
+100 X = X * 2
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10 \n");
+    }
+
+    #[test]
+    fn test_gosub_expression_target() {
+        let output = run_program(
+            "\
+10 L = 100
+20 GOSUB L
+30 END
+100 PRINT \"CALLED\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CALLED\n");
+    }
+
+    #[test]
+    fn test_gosub_on_multi_statement_line() {
+        let output = run_program(
+            "\
+10 GOSUB 100 : PRINT \"AFTER GOSUB\"
+20 END
+100 PRINT \"IN SUB\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "IN SUB\nAFTER GOSUB\n");
+    }
+
+    #[test]
+    fn test_return_without_gosub() {
+        let result = run_program(
+            "\
+10 RETURN
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("RETURN without GOSUB"));
+    }
+
+    #[test]
+    fn test_gosub_invalid_line() {
+        let result = run_program(
+            "\
+10 GOSUB 999
+20 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_gosub_in_for_loop() {
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 3
+20 GOSUB 100
+30 NEXT I
+40 END
+100 PRINT I;
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3 ");
+    }
+
+    #[test]
+    fn test_gosub_in_if_then() {
+        let output = run_program(
+            "\
+10 X = 1
+20 IF X = 1 THEN GOSUB 100
+30 END
+100 PRINT \"YES\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "YES\n");
+    }
+
+    #[test]
+    fn test_gosub_deeply_nested() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 END
+100 GOSUB 200
+110 RETURN
+200 GOSUB 300
+210 RETURN
+300 PRINT \"DEEP\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DEEP\n");
     }
 }

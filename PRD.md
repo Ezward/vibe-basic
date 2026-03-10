@@ -43,11 +43,18 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
     - QUIT: This debugger command exits the program and quits back to the operating system.
     - HELP: Print the list of debugging commands and how they are used.
 
-8. GW-BASIC supports a DATA statement and a READ statement to read the data and a RESTORE statement that allows DATA statements to be reread from a specified line.   See https://hwiegman.home.xs4all.nl/gw-man/DATA.html and https://hwiegman.home.xs4all.nl/gw-man/READ.html and https://hwiegman.home.xs4all.nl/gw-man/RESTORE.html respectively.  Implement these statements and related unit tests.  Implement an example program that tests these statements and save as ./examples/data.bas.
+8. GW-BASIC supports a DATA statement and a READ statement to read the data and a RESTORE statement that allows DATA statements to be reread from a specified line.   See https://hwiegman.home.xs4all.nl/gw-man/DATA.html and https://hwiegman.home.xs4all.nl/gw-man/READ.html and https://hwiegman.home.xs4all.nl/gw-man/RESTORE.html respectively.  Implement these statements and related unit tests.  Implement an example program that tests these statements and save as ./examples/data.bas.  Make sure this parses and runs correctly.
 
-9. GW-BASIC supports multidimensional arrays using the DIM statement.  The ERASE statement can be used to eliminate arrays from a program to save memory or to allow them to be redimensioned.  See '6.2.3 Array Variables' section of https://hwiegman.home.xs4all.nl/gw-man/ for an explanation of array variables.  See https://hwiegman.home.xs4all.nl/gw-man/DIM.html and https://hwiegman.home.xs4all.nl/gw-man/ERASE.html respectively for explanation of the related statements.  Implement the array syntax and these related statements.  Implement an example program that tests these statements and save as ./examples/arrays.bas.
+9. GW-BASIC supports multidimensional arrays using the DIM statement.  The ERASE statement can be used to eliminate arrays from a program to save memory or to allow them to be redimensioned.  See '6.2.3 Array Variables' section of https://hwiegman.home.xs4all.nl/gw-man/ for an explanation of array variables.  See https://hwiegman.home.xs4all.nl/gw-man/DIM.html and https://hwiegman.home.xs4all.nl/gw-man/ERASE.html respectively for explanation of the related statements.  Implement the array syntax and these related statements.  Implement an example program that tests these statements and save as ./examples/arrays.bas. Make sure this parses and runs correctly.
 
-10. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
+10. GW-BASIC includes the GOSUB ... RETURN Statement that branches-to and returns-from a subroutine.  Implement the GOSUB...RETURN statements in the parser and the interpreter.
+- The GOSUB statements takes a single expression argument that should evaluate to a BASIC line number, which is used as the first line number of the subroutine.
+- When executing a GOSUB statement, the intepreter should remember (on a stack) the line after the subroutine so that the RETURN statement can pop that value.
+- The RETURN statement in a subroutine causes GW-BASIC to return to the statement following the most recent GOSUB statement.  For this reason, hhen executing a GOSUB statement, the intepreter should remember (on a stack) the line after the subroutine so that the RETURN statement can pop that value.
+Write an example program that tests GOSUB...RETURN and save as ./examples/gosub.bas.  Make sure this parses and runs correctly.
+
+
+11. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
 
 Generally:
 

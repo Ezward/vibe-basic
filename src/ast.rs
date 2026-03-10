@@ -5,7 +5,7 @@
 //! `Parser` struct which converts a token stream into the AST. The parser handles
 //! line numbers, multi-statement lines (colon-separated), and all BASIC statement
 //! types including LET (explicit and implicit), PRINT, IF/THEN, GOTO, INPUT,
-//! FOR/NEXT, REM, and END.
+//! FOR/NEXT, GOSUB/RETURN, REM, and END.
 
 use crate::expr::{Expr, ExprParser};
 use crate::token::Token;
@@ -65,6 +65,10 @@ pub enum Statement {
     Erase {
         arrays: Vec<String>,
     },
+    Gosub {
+        target: Expr,
+    },
+    Return,
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -296,6 +300,15 @@ impl<'a> Parser<'a> {
             Token::Erase => {
                 self.advance();
                 self.parse_erase()
+            }
+            Token::Gosub => {
+                self.advance();
+                let target = self.parse_expression()?;
+                Ok(Statement::Gosub { target })
+            }
+            Token::Return => {
+                self.advance();
+                Ok(Statement::Return)
             }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
@@ -1486,5 +1499,51 @@ mod tests {
     fn test_parse_dim_error_missing_rparen() {
         let err = parse_program_err("10 DIM A(10");
         assert!(err.contains("Expected ')' in DIM"));
+    }
+
+    #[test]
+    fn test_parse_gosub() {
+        let stmt = parse_single_statement("10 GOSUB 100");
+        assert!(matches!(stmt, Statement::Gosub { .. }));
+        if let Statement::Gosub { target } = stmt {
+            assert_eq!(target, Expr::Number(100.0));
+        }
+    }
+
+    #[test]
+    fn test_parse_gosub_expression() {
+        let stmt = parse_single_statement("10 GOSUB 100 + 50");
+        assert!(matches!(stmt, Statement::Gosub { .. }));
+    }
+
+    #[test]
+    fn test_parse_return() {
+        let stmt = parse_single_statement("10 RETURN");
+        assert!(matches!(stmt, Statement::Return));
+    }
+
+    #[test]
+    fn test_parse_gosub_return_in_program() {
+        let prog = parse_program("10 GOSUB 100\n20 END\n100 PRINT \"HI\"\n110 RETURN");
+        assert_eq!(prog.lines.len(), 4);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Gosub { .. }));
+        assert!(matches!(prog.lines[3].statements[0], Statement::Return));
+    }
+
+    #[test]
+    fn test_parse_gosub_in_if_then() {
+        let stmt = parse_single_statement("10 IF X = 1 THEN GOSUB 100");
+        assert!(matches!(stmt, Statement::If { .. }));
+        if let Statement::If { then, .. } = stmt {
+            assert!(matches!(*then, ThenClause::Statement(Statement::Gosub { .. })));
+        }
+    }
+
+    #[test]
+    fn test_parse_gosub_on_multi_statement_line() {
+        let prog = parse_program("10 GOSUB 100 : PRINT \"AFTER\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Gosub { .. }));
+        assert!(matches!(prog.lines[0].statements[1], Statement::Print { .. }));
     }
 }

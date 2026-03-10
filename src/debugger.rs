@@ -45,6 +45,7 @@ pub struct Debugger<R: BufRead, W: Write> {
     interpreter: Interpreter<R, W>,
     breakpoints: Vec<Breakpoint>,
     line_idx: usize,
+    start_stmt_idx: usize,
     finished: bool,
 }
 
@@ -55,6 +56,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             interpreter,
             breakpoints: Vec::new(),
             line_idx: 0,
+            start_stmt_idx: 0,
             finished: false,
         }
     }
@@ -239,12 +241,17 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         }
 
         let line = &program.lines[self.line_idx];
+        let mut stmt_idx = self.start_stmt_idx;
+        self.start_stmt_idx = 0;
         let mut next_line_idx = self.line_idx + 1;
 
-        for stmt in &line.statements {
+        while stmt_idx < line.statements.len() {
+            let stmt = &line.statements[stmt_idx];
             let result = self.interpreter.execute_statement(stmt, self.line_idx, program);
             match result {
-                Ok(StmtResult::Continue) => {}
+                Ok(StmtResult::Continue) => {
+                    stmt_idx += 1;
+                }
                 Ok(StmtResult::Goto(target_line)) => match self.interpreter.find_line_index(program, target_line) {
                     Ok(idx) => {
                         next_line_idx = idx;
@@ -252,6 +259,33 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                     }
                     Err(e) => return ExecutionOutcome::Error(e),
                 },
+                Ok(StmtResult::Gosub(target_line)) => {
+                    let return_addr = if stmt_idx + 1 < line.statements.len() {
+                        crate::interpreter::GosubReturn {
+                            line_index: self.line_idx,
+                            stmt_index: stmt_idx + 1,
+                        }
+                    } else {
+                        crate::interpreter::GosubReturn {
+                            line_index: self.line_idx + 1,
+                            stmt_index: 0,
+                        }
+                    };
+                    self.interpreter.gosub_stack.push(return_addr);
+                    match self.interpreter.find_line_index(program, target_line) {
+                        Ok(idx) => {
+                            next_line_idx = idx;
+                            break;
+                        }
+                        Err(e) => return ExecutionOutcome::Error(e),
+                    }
+                }
+                Ok(StmtResult::Return) => {
+                    let ret = self.interpreter.gosub_stack.pop().unwrap();
+                    next_line_idx = ret.line_index;
+                    self.start_stmt_idx = ret.stmt_index;
+                    break;
+                }
                 Ok(StmtResult::End) => {
                     return ExecutionOutcome::Finished;
                 }

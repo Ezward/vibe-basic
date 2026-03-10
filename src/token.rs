@@ -34,6 +34,8 @@ pub enum Token {
     Restore,
     Dim,
     Erase,
+    Gosub,
+    Return,
     // Logical operators
     And,
     Or,
@@ -185,6 +187,8 @@ impl Lexer {
             "RESTORE" => Token::Restore,
             "DIM" => Token::Dim,
             "ERASE" => Token::Erase,
+            "GOSUB" => Token::Gosub,
+            "RETURN" => Token::Return,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
@@ -623,6 +627,30 @@ mod tests {
                 Token::Eof,
             ]
         );
+    }
+
+    #[test]
+    fn test_tokenize_gosub_keyword() {
+        let tokens = Lexer::new("GOSUB").tokenize();
+        assert_eq!(tokens, vec![Token::Gosub, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_return_keyword() {
+        let tokens = Lexer::new("RETURN").tokenize();
+        assert_eq!(tokens, vec![Token::Return, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_gosub_return_case_insensitive() {
+        let tokens = Lexer::new("gosub return").tokenize();
+        assert_eq!(tokens, vec![Token::Gosub, Token::Return, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_gosub_statement() {
+        let tokens = Lexer::new("GOSUB 100").tokenize();
+        assert_eq!(tokens, vec![Token::Gosub, Token::Number(100.0), Token::Eof]);
     }
 
     #[test]
