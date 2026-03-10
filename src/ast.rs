@@ -69,6 +69,10 @@ pub enum Statement {
     Gosub {
         target: Expr,
     },
+    OnGosub {
+        selector: Expr,
+        targets: Vec<u32>,
+    },
     Return {
         target: Option<Expr>,
     },
@@ -303,6 +307,10 @@ impl<'a> Parser<'a> {
             Token::Erase => {
                 self.advance();
                 self.parse_erase()
+            }
+            Token::On => {
+                self.advance();
+                self.parse_on_gosub()
             }
             Token::Gosub => {
                 self.advance();
@@ -672,6 +680,34 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(Statement::Restore { line_number })
+    }
+
+    /// Parses an `ON expr GOSUB line1, line2, ...` statement.
+    /// The selector expression is evaluated at runtime to choose which target line to GOSUB to.
+    /// Targets are 1-indexed: ON 1 GOSUB 100,200 calls line 100, ON 2 calls line 200.
+    fn parse_on_gosub(&mut self) -> Result<Statement, String> {
+        let selector = self.parse_expression()?;
+        if *self.peek() != Token::Gosub {
+            return Err(self.error_with_context("Expected GOSUB after ON expression".to_string()));
+        }
+        self.advance(); // consume GOSUB
+        let mut targets = Vec::new();
+        if let Token::Number(n) = self.peek().clone() {
+            self.advance();
+            targets.push(n as u32);
+        } else {
+            return Err(self.error_with_context("Expected line number after ON...GOSUB".to_string()));
+        }
+        while *self.peek() == Token::Comma {
+            self.advance();
+            if let Token::Number(n) = self.peek().clone() {
+                self.advance();
+                targets.push(n as u32);
+            } else {
+                return Err(self.error_with_context("Expected line number after comma in ON...GOSUB".to_string()));
+            }
+        }
+        Ok(Statement::OnGosub { selector, targets })
     }
 }
 
@@ -1623,5 +1659,84 @@ mod tests {
         assert_eq!(prog.lines[0].statements.len(), 2);
         assert!(matches!(prog.lines[0].statements[0], Statement::Gosub { .. }));
         assert!(matches!(prog.lines[0].statements[1], Statement::Print { .. }));
+    }
+
+    #[test]
+    fn test_parse_on_gosub_basic() {
+        let stmt = parse_single_statement("10 ON X GOSUB 100, 200, 300");
+        match stmt {
+            Statement::OnGosub { selector, targets } => {
+                assert!(matches!(selector, Expr::Variable(_)));
+                assert_eq!(targets, vec![100, 200, 300]);
+            }
+            _ => panic!("Expected OnGosub, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_gosub_single_target() {
+        let stmt = parse_single_statement("10 ON I GOSUB 500");
+        match stmt {
+            Statement::OnGosub { targets, .. } => {
+                assert_eq!(targets, vec![500]);
+            }
+            _ => panic!("Expected OnGosub"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_gosub_expression_selector() {
+        let stmt = parse_single_statement("10 ON A + 1 GOSUB 100, 200");
+        match stmt {
+            Statement::OnGosub { selector, targets } => {
+                assert!(matches!(selector, Expr::BinaryOp { .. }));
+                assert_eq!(targets, vec![100, 200]);
+            }
+            _ => panic!("Expected OnGosub"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_gosub_on_multi_statement_line() {
+        let prog = parse_program("10 ON I GOSUB 100, 200 : PRINT \"AFTER\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::OnGosub { .. }));
+        assert!(matches!(prog.lines[0].statements[1], Statement::Print { .. }));
+    }
+
+    #[test]
+    fn test_parse_on_gosub_error_missing_gosub() {
+        let tokens = Lexer::new("10 ON X 100, 200").tokenize();
+        let source_lines = vec!["10 ON X 100, 200".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected GOSUB"));
+    }
+
+    #[test]
+    fn test_parse_on_gosub_error_missing_line_number() {
+        let tokens = Lexer::new("10 ON X GOSUB").tokenize();
+        let source_lines = vec!["10 ON X GOSUB".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected line number"));
+    }
+
+    #[test]
+    fn test_parse_on_gosub_in_program() {
+        let prog = parse_program(
+            "\
+10 ON I GOSUB 100, 200
+20 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+",
+        );
+        assert_eq!(prog.lines.len(), 6);
+        assert!(matches!(prog.lines[0].statements[0], Statement::OnGosub { .. }));
     }
 }

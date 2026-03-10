@@ -414,6 +414,17 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 let line_num = val.as_number()? as u32;
                 Ok(StmtResult::Gosub(line_num))
             }
+            Statement::OnGosub { selector, targets } => {
+                let val = self.evaluator.eval_expr(selector)?;
+                let index = val.as_number()? as i64;
+                if index < 1 || index as usize > targets.len() {
+                    // Out of range: continue to next statement (GW-BASIC behavior)
+                    Ok(StmtResult::Continue)
+                } else {
+                    let line_num = targets[(index - 1) as usize];
+                    Ok(StmtResult::Gosub(line_num))
+                }
+            }
             Statement::Return { target } => {
                 if self.gosub_stack.is_empty() {
                     return Err("RETURN without GOSUB".to_string());
@@ -2430,5 +2441,195 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("RETURN without GOSUB"));
+    }
+
+    #[test]
+    fn test_on_gosub_basic() {
+        let output = run_program(
+            "\
+10 ON 1 GOSUB 100, 200, 300
+20 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+300 PRINT \"THIRD\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "FIRST\n");
+    }
+
+    #[test]
+    fn test_on_gosub_second_target() {
+        let output = run_program(
+            "\
+10 ON 2 GOSUB 100, 200, 300
+20 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+300 PRINT \"THIRD\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_gosub_third_target() {
+        let output = run_program(
+            "\
+10 ON 3 GOSUB 100, 200, 300
+20 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+300 PRINT \"THIRD\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "THIRD\n");
+    }
+
+    #[test]
+    fn test_on_gosub_out_of_range_zero() {
+        let output = run_program(
+            "\
+10 ON 0 GOSUB 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_gosub_out_of_range_high() {
+        let output = run_program(
+            "\
+10 ON 5 GOSUB 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_gosub_negative_index() {
+        let output = run_program(
+            "\
+10 ON -1 GOSUB 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_gosub_expression_selector() {
+        let output = run_program(
+            "\
+10 X = 1
+20 ON X + 1 GOSUB 100, 200, 300
+30 END
+100 PRINT \"FIRST\"
+110 RETURN
+200 PRINT \"SECOND\"
+210 RETURN
+300 PRINT \"THIRD\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_gosub_in_loop() {
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 3
+20   ON I GOSUB 100, 200, 300
+30 NEXT I
+40 END
+100 PRINT \"A\";
+110 RETURN
+200 PRINT \"B\";
+210 RETURN
+300 PRINT \"C\"
+310 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ABC\n");
+    }
+
+    #[test]
+    fn test_on_gosub_multi_statement_line() {
+        let output = run_program(
+            "\
+10 R$ = \"NONE\" : ON 2 GOSUB 100, 200 : PRINT R$
+20 END
+100 R$ = \"FIRST\"
+110 RETURN
+200 R$ = \"SECOND\"
+210 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_gosub_with_return_to_multi_statement() {
+        // Verify that RETURN from ON GOSUB correctly resumes at the next
+        // statement on the same line as the ON GOSUB
+        let output = run_program(
+            "\
+10 ON 1 GOSUB 100 : PRINT \"AFTER\"
+20 END
+100 PRINT \"SUB\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\nAFTER\n");
+    }
+
+    #[test]
+    fn test_on_gosub_single_target() {
+        let output = run_program(
+            "\
+10 ON 1 GOSUB 100
+20 END
+100 PRINT \"ONLY\"
+110 RETURN
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ONLY\n");
     }
 }
