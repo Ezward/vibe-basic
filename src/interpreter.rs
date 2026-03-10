@@ -130,10 +130,24 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                         })?;
                         break;
                     }
-                    StmtResult::Return => {
-                        let ret = self.gosub_stack.pop().unwrap();
-                        next_line_idx = ret.line_index;
-                        start_stmt_idx = ret.stmt_index;
+                    StmtResult::Return(target_line) => {
+                        // Always pop the gosub stack
+                        let _ret = self.gosub_stack.pop().unwrap();
+                        if let Some(line_num) = target_line {
+                            // RETURN with line number: jump to specified line instead of return address
+                            next_line_idx = self.find_line_index(program, line_num).map_err(|e| {
+                                let source_text = program
+                                    .source_lines
+                                    .get(line.source_line - 1)
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("<unknown>");
+                                format!("{}\n  at line {}: {}", e, line.source_line, source_text)
+                            })?;
+                        } else {
+                            // RETURN without line number: use stacked return address
+                            next_line_idx = _ret.line_index;
+                            start_stmt_idx = _ret.stmt_index;
+                        }
                         break;
                     }
                     StmtResult::End => return Ok(()),
@@ -400,11 +414,18 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 let line_num = val.as_number()? as u32;
                 Ok(StmtResult::Gosub(line_num))
             }
-            Statement::Return => {
+            Statement::Return { target } => {
                 if self.gosub_stack.is_empty() {
                     return Err("RETURN without GOSUB".to_string());
                 }
-                Ok(StmtResult::Return)
+                let target_line = match target {
+                    Some(expr) => {
+                        let val = self.evaluator.eval_expr(expr)?;
+                        Some(val.as_number()? as u32)
+                    }
+                    None => None,
+                };
+                Ok(StmtResult::Return(target_line))
             }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
@@ -551,7 +572,7 @@ pub(crate) enum StmtResult {
     Continue,
     Goto(u32),
     Gosub(u32),
-    Return,
+    Return(Option<u32>),
     End,
     SkipLine,
     ForLoopSkip(usize),
@@ -2314,5 +2335,100 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "DEEP\n");
+    }
+
+    #[test]
+    fn test_return_with_line_number() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 PRINT \"SHOULD NOT PRINT\"
+30 END
+100 PRINT \"IN SUB\"
+110 RETURN 30
+",
+        )
+        .unwrap();
+        assert_eq!(output, "IN SUB\n");
+    }
+
+    #[test]
+    fn test_return_with_expression_target() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 PRINT \"SHOULD NOT PRINT\"
+30 END
+100 PRINT \"IN SUB\"
+110 L = 30
+120 RETURN L
+",
+        )
+        .unwrap();
+        assert_eq!(output, "IN SUB\n");
+    }
+
+    #[test]
+    fn test_return_with_line_number_redirects_flow() {
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 PRINT \"NORMAL RETURN\"
+30 END
+50 PRINT \"REDIRECTED\"
+60 END
+100 PRINT \"IN SUB\"
+110 RETURN 50
+",
+        )
+        .unwrap();
+        assert_eq!(output, "IN SUB\nREDIRECTED\n");
+    }
+
+    #[test]
+    fn test_return_with_line_number_still_pops_stack() {
+        // RETURN with line number should still pop the gosub stack,
+        // so a subsequent RETURN should use the outer GOSUB's return address
+        let output = run_program(
+            "\
+10 GOSUB 100
+20 PRINT \"BACK FROM OUTER\"
+30 END
+100 PRINT \"OUTER\"
+110 GOSUB 200
+120 PRINT \"SHOULD NOT PRINT\"
+130 RETURN
+200 PRINT \"INNER\"
+210 RETURN 130
+",
+        )
+        .unwrap();
+        // Inner RETURN 130 pops inner stack entry, jumps to line 130 (RETURN)
+        // Line 130 RETURN pops outer stack entry, jumps back to line 20
+        assert_eq!(output, "OUTER\nINNER\nBACK FROM OUTER\n");
+    }
+
+    #[test]
+    fn test_return_with_invalid_line_number() {
+        let result = run_program(
+            "\
+10 GOSUB 100
+20 END
+100 RETURN 999
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_return_without_gosub_with_line_number() {
+        let result = run_program(
+            "\
+10 RETURN 100
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("RETURN without GOSUB"));
     }
 }

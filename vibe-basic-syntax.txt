@@ -28,7 +28,7 @@ for_stmt        = "FOR" variable "=" expression "TO" expression
                   [ "STEP" expression ] ;
 next_stmt       = "NEXT" [ variable ] ;
 gosub_stmt      = "GOSUB" expression ;
-return_stmt     = "RETURN" ;
+return_stmt     = "RETURN" [ expression ] ;
 def_fn_stmt     = "DEF" "FN" identifier [ "(" identifier { "," identifier } ")" ]
                   "=" expression ;
 data_stmt       = "DATA" data_item { "," data_item } ;
@@ -125,6 +125,12 @@ II. SEMANTIC EXPLANATIONS
    The target is an expression, so it may be a literal line number or a variable:
      GOSUB 500        — branch to subroutine at line 500
      GOSUB BASE + 100 — branch to a computed line number
+   RETURN may optionally take an expression argument that evaluates to a line
+   number. When provided, RETURN still pops the subroutine stack but jumps to
+   the specified line number instead of the stacked return address:
+     RETURN           — resume at the statement after the most recent GOSUB
+     RETURN 500       — pop the stack, then jump to line 500
+     RETURN BASE + 10 — pop the stack, then jump to a computed line number
    On a multi-statement line, RETURN resumes at the next statement after the
    GOSUB on the calling line, not at the next line:
      10 GOSUB 100 : PRINT "AFTER"   — PRINT executes after RETURN

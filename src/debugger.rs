@@ -280,10 +280,19 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                         Err(e) => return ExecutionOutcome::Error(e),
                     }
                 }
-                Ok(StmtResult::Return) => {
+                Ok(StmtResult::Return(target_line)) => {
                     let ret = self.interpreter.gosub_stack.pop().unwrap();
-                    next_line_idx = ret.line_index;
-                    self.start_stmt_idx = ret.stmt_index;
+                    if let Some(line_num) = target_line {
+                        match self.interpreter.find_line_index(program, line_num) {
+                            Ok(idx) => {
+                                next_line_idx = idx;
+                            }
+                            Err(e) => return ExecutionOutcome::Error(e),
+                        }
+                    } else {
+                        next_line_idx = ret.line_index;
+                        self.start_stmt_idx = ret.stmt_index;
+                    }
                     break;
                 }
                 Ok(StmtResult::End) => {

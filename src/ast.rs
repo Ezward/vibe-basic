@@ -69,7 +69,9 @@ pub enum Statement {
     Gosub {
         target: Expr,
     },
-    Return,
+    Return {
+        target: Option<Expr>,
+    },
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -309,7 +311,12 @@ impl<'a> Parser<'a> {
             }
             Token::Return => {
                 self.advance();
-                Ok(Statement::Return)
+                let target = if self.at_statement_end() {
+                    None
+                } else {
+                    Some(self.parse_expression()?)
+                };
+                Ok(Statement::Return { target })
             }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
@@ -1562,7 +1569,32 @@ mod tests {
     #[test]
     fn test_parse_return() {
         let stmt = parse_single_statement("10 RETURN");
-        assert!(matches!(stmt, Statement::Return));
+        assert!(matches!(stmt, Statement::Return { target: None }));
+    }
+
+    #[test]
+    fn test_parse_return_with_line_number() {
+        let stmt = parse_single_statement("10 RETURN 500");
+        assert!(matches!(stmt, Statement::Return { target: Some(_) }));
+        if let Statement::Return { target: Some(expr) } = stmt {
+            assert_eq!(expr, Expr::Number(500.0));
+        }
+    }
+
+    #[test]
+    fn test_parse_return_with_expression() {
+        let stmt = parse_single_statement("10 RETURN 100 + 200");
+        assert!(matches!(stmt, Statement::Return { target: Some(_) }));
+    }
+
+    #[test]
+    fn test_parse_return_on_multi_statement_line() {
+        let prog = parse_program("10 RETURN : PRINT \"AFTER\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(
+            prog.lines[0].statements[0],
+            Statement::Return { target: None }
+        ));
     }
 
     #[test]
@@ -1570,7 +1602,10 @@ mod tests {
         let prog = parse_program("10 GOSUB 100\n20 END\n100 PRINT \"HI\"\n110 RETURN");
         assert_eq!(prog.lines.len(), 4);
         assert!(matches!(prog.lines[0].statements[0], Statement::Gosub { .. }));
-        assert!(matches!(prog.lines[3].statements[0], Statement::Return));
+        assert!(matches!(
+            prog.lines[3].statements[0],
+            Statement::Return { target: None }
+        ));
     }
 
     #[test]
