@@ -32,6 +32,8 @@ pub enum Token {
     Data,
     Read,
     Restore,
+    Dim,
+    Erase,
     // Logical operators
     And,
     Or,
@@ -181,6 +183,8 @@ impl Lexer {
             "DATA" => Token::Data,
             "READ" => Token::Read,
             "RESTORE" => Token::Restore,
+            "DIM" => Token::Dim,
+            "ERASE" => Token::Erase,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
@@ -585,6 +589,40 @@ mod tests {
     fn test_tokenize_data_read_restore_case_insensitive() {
         let tokens = Lexer::new("data read restore").tokenize();
         assert_eq!(tokens, vec![Token::Data, Token::Read, Token::Restore, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_dim_keyword() {
+        let tokens = Lexer::new("DIM").tokenize();
+        assert_eq!(tokens, vec![Token::Dim, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_erase_keyword() {
+        let tokens = Lexer::new("ERASE").tokenize();
+        assert_eq!(tokens, vec![Token::Erase, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_dim_erase_case_insensitive() {
+        let tokens = Lexer::new("dim erase").tokenize();
+        assert_eq!(tokens, vec![Token::Dim, Token::Erase, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_dim_statement() {
+        let tokens = Lexer::new("DIM A(10)").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Dim,
+                Token::Identifier("A".to_string()),
+                Token::LeftParen,
+                Token::Number(10.0),
+                Token::RightParen,
+                Token::Eof,
+            ]
+        );
     }
 
     #[test]

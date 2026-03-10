@@ -129,9 +129,18 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         program: &Program,
     ) -> Result<StmtResult, String> {
         match stmt {
-            Statement::Let { variable, expression } => {
+            Statement::Let {
+                variable,
+                indices,
+                expression,
+            } => {
                 let value = self.evaluator.eval_expr(expression)?;
-                self.evaluator.variables.insert(variable.clone(), value);
+                if indices.is_empty() {
+                    self.evaluator.variables.insert(variable.clone(), value);
+                } else {
+                    let subs = self.evaluator.eval_subscripts(indices)?;
+                    self.evaluator.set_array_element(variable, &subs, value)?;
+                }
                 Ok(StmtResult::Continue)
             }
             Statement::Print { items } => {
@@ -163,8 +172,12 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 }
             }
             Statement::Goto { line_number } => Ok(StmtResult::Goto(*line_number)),
-            Statement::Input { prompt, variable } => {
-                self.execute_input(prompt.as_deref(), variable)?;
+            Statement::Input {
+                prompt,
+                variable,
+                indices,
+            } => {
+                self.execute_input(prompt.as_deref(), variable, indices)?;
                 Ok(StmtResult::Continue)
             }
             Statement::For {
@@ -263,7 +276,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 Ok(StmtResult::Continue)
             }
             Statement::Read { variables } => {
-                for var_name in variables {
+                for (var_name, indices) in variables {
                     if self.data_pointer >= self.data_pool.len() {
                         return Err("Out of DATA".to_string());
                     }
@@ -289,7 +302,12 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                             }
                         }
                     };
-                    self.evaluator.variables.insert(var_name.clone(), value);
+                    if indices.is_empty() {
+                        self.evaluator.variables.insert(var_name.clone(), value);
+                    } else {
+                        let subs = self.evaluator.eval_subscripts(indices)?;
+                        self.evaluator.set_array_element(var_name, &subs, value)?;
+                    }
                 }
                 Ok(StmtResult::Continue)
             }
@@ -304,6 +322,32 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     }
                 } else {
                     self.data_pointer = 0;
+                }
+                Ok(StmtResult::Continue)
+            }
+            Statement::Dim { arrays } => {
+                for (name, dim_exprs) in arrays {
+                    if self.evaluator.arrays.contains_key(name) {
+                        return Err(format!("Array {} already dimensioned", name));
+                    }
+                    let mut dims = Vec::new();
+                    for expr in dim_exprs {
+                        let max_sub = self.evaluator.eval_expr(expr)?.as_number()? as i64;
+                        if max_sub < 0 {
+                            return Err(format!("Invalid dimension: {}", max_sub));
+                        }
+                        dims.push((max_sub + 1) as usize); // subscripts 0..=max_sub
+                    }
+                    let is_string = name.ends_with('$');
+                    self.evaluator
+                        .arrays
+                        .insert(name.clone(), crate::eval::Array::new(dims, is_string));
+                }
+                Ok(StmtResult::Continue)
+            }
+            Statement::Erase { arrays } => {
+                for name in arrays {
+                    self.evaluator.arrays.remove(name);
                 }
                 Ok(StmtResult::Continue)
             }
@@ -376,7 +420,13 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
     /// Executes an INPUT statement: prints an optional prompt and "? ", reads a line,
     /// and stores it as a string (for $ variables) or parses it as a number.
-    fn execute_input(&mut self, prompt: Option<&str>, variable: &str) -> Result<(), String> {
+    /// Supports both scalar variables and array elements.
+    fn execute_input(
+        &mut self,
+        prompt: Option<&str>,
+        variable: &str,
+        indices: &[crate::expr::Expr],
+    ) -> Result<(), String> {
         if let Some(p) = prompt {
             write!(self.output, "{}", p).map_err(|e| e.to_string())?;
         }
@@ -396,7 +446,12 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             Value::String(line)
         };
 
-        self.evaluator.variables.insert(variable.to_string(), value);
+        if indices.is_empty() {
+            self.evaluator.variables.insert(variable.to_string(), value);
+        } else {
+            let subs = self.evaluator.eval_subscripts(indices)?;
+            self.evaluator.set_array_element(variable, &subs, value)?;
+        }
         self.column = 0;
         Ok(())
     }
@@ -1801,5 +1856,216 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, " 3.14 \n");
+    }
+
+    // --- DIM / ERASE / Array integration tests ---
+
+    #[test]
+    fn test_dim_and_array_access() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 A(1) = 10
+30 A(2) = 20
+40 PRINT A(1); A(2)
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10  20 \n");
+    }
+
+    #[test]
+    fn test_dim_multidimensional() {
+        let output = run_program(
+            "\
+10 DIM B(3, 4)
+20 B(1, 2) = 42
+30 PRINT B(1, 2)
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_dim_initialized_to_zero() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 PRINT A(0); A(3); A(5)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 0  0  0 \n");
+    }
+
+    #[test]
+    fn test_dim_string_array() {
+        let output = run_program(
+            "\
+10 DIM N$(3)
+20 N$(1) = \"HELLO\"
+30 N$(2) = \"WORLD\"
+40 PRINT N$(1); \" \"; N$(2)
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "HELLO WORLD\n");
+    }
+
+    #[test]
+    fn test_array_auto_dimension() {
+        // Accessing array without DIM should auto-create with max subscript 10
+        let output = run_program(
+            "\
+10 A(5) = 99
+20 PRINT A(5)
+30 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 99 \n");
+    }
+
+    #[test]
+    fn test_array_subscript_out_of_range() {
+        let result = run_program(
+            "\
+10 DIM A(5)
+20 A(6) = 1
+30 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Subscript out of range"));
+    }
+
+    #[test]
+    fn test_erase_and_redim() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 A(3) = 42
+30 ERASE A
+40 DIM A(10)
+50 PRINT A(3)
+60 END
+",
+        )
+        .unwrap();
+        // After ERASE and re-DIM, all elements should be zero
+        assert_eq!(output, " 0 \n");
+    }
+
+    #[test]
+    fn test_redim_without_erase_error() {
+        let result = run_program(
+            "\
+10 DIM A(5)
+20 DIM A(10)
+30 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already dimensioned"));
+    }
+
+    #[test]
+    fn test_array_in_for_loop() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 FOR I = 1 TO 5
+30   A(I) = I * 10
+40 NEXT I
+50 FOR I = 1 TO 5
+60   PRINT A(I);
+70 NEXT I
+80 PRINT
+90 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10  20  30  40  50 \n");
+    }
+
+    #[test]
+    fn test_array_in_expression() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 A(1) = 10
+30 A(2) = 20
+40 PRINT A(1) + A(2)
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 30 \n");
+    }
+
+    #[test]
+    fn test_read_into_array() {
+        let output = run_program(
+            "\
+10 DIM A(5)
+20 DATA 10, 20, 30
+30 READ A(1), A(2), A(3)
+40 PRINT A(1); A(2); A(3)
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10  20  30 \n");
+    }
+
+    #[test]
+    fn test_erase_multiple() {
+        let output = run_program(
+            "\
+10 DIM A(5), B(3)
+20 A(1) = 1
+30 B(1) = 2
+40 ERASE A, B
+50 DIM A(10), B(10)
+60 PRINT A(1); B(1)
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 0  0 \n");
+    }
+
+    #[test]
+    fn test_dim_3d_array() {
+        let output = run_program(
+            "\
+10 DIM C(2, 3, 4)
+20 C(1, 2, 3) = 123
+30 PRINT C(1, 2, 3); C(0, 0, 0)
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 123  0 \n");
+    }
+
+    #[test]
+    fn test_array_with_computed_index() {
+        let output = run_program(
+            "\
+10 DIM A(10)
+20 I = 3
+30 A(I * 2) = 99
+40 PRINT A(6)
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 99 \n");
     }
 }

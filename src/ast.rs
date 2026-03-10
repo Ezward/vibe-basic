@@ -15,6 +15,7 @@ use crate::token::Token;
 pub enum Statement {
     Let {
         variable: String,
+        indices: Vec<Expr>,
         expression: Expr,
     },
     Print {
@@ -31,6 +32,7 @@ pub enum Statement {
     Input {
         prompt: Option<String>,
         variable: String,
+        indices: Vec<Expr>,
     },
     For {
         variable: String,
@@ -45,7 +47,7 @@ pub enum Statement {
         values: Vec<Expr>,
     },
     Read {
-        variables: Vec<String>,
+        variables: Vec<(String, Vec<Expr>)>,
     },
     Restore {
         line_number: Option<u32>,
@@ -56,6 +58,12 @@ pub enum Statement {
         name: String,
         params: Vec<String>,
         body: Expr,
+    },
+    Dim {
+        arrays: Vec<(String, Vec<Expr>)>,
+    },
+    Erase {
+        arrays: Vec<String>,
     },
 }
 
@@ -281,6 +289,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_restore()
             }
+            Token::Dim => {
+                self.advance();
+                self.parse_dim()
+            }
+            Token::Erase => {
+                self.advance();
+                self.parse_erase()
+            }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
                 self.parse_let_body()
@@ -292,16 +308,37 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses the body of a LET statement: `variable = expression`.
+    /// Parses the body of a LET statement: `variable[(subscripts)] = expression`.
+    /// Supports both scalar assignment (`X = 5`) and array element assignment (`A(1, 2) = 5`).
     fn parse_let_body(&mut self) -> Result<Statement, String> {
         let variable = self.expect_identifier()?;
+        let indices = if *self.peek() == Token::LeftParen {
+            self.advance();
+            let mut idx = Vec::new();
+            idx.push(self.parse_expression()?);
+            while *self.peek() == Token::Comma {
+                self.advance();
+                idx.push(self.parse_expression()?);
+            }
+            if *self.peek() != Token::RightParen {
+                return Err(self.error_with_context("Expected ')' after array subscripts".to_string()));
+            }
+            self.advance();
+            idx
+        } else {
+            Vec::new()
+        };
         if *self.peek() != Token::Equal {
             let msg = format!("Expected '=' after variable in LET, got {:?}", self.peek());
             return Err(self.error_with_context(msg));
         }
         self.advance();
         let expression = self.parse_expression()?;
-        Ok(Statement::Let { variable, expression })
+        Ok(Statement::Let {
+            variable,
+            indices,
+            expression,
+        })
     }
 
     /// Parses a PRINT statement's item list (expressions, semicolons, and commas).
@@ -361,9 +398,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses an INPUT statement: `INPUT ["prompt";] variable`.
+    /// Parses an INPUT statement: `INPUT ["prompt";] variable[(subscripts)]`.
     fn parse_input(&mut self) -> Result<Statement, String> {
-        // INPUT [string ";"] variable
+        // INPUT [string ";"] variable[(subscripts)]
         let prompt;
         let variable;
 
@@ -389,7 +426,12 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Statement::Input { prompt, variable })
+        let indices = self.parse_optional_subscripts()?;
+        Ok(Statement::Input {
+            prompt,
+            variable,
+            indices,
+        })
     }
 
     /// Parses a FOR statement: `FOR var = start TO end [STEP step]`.
@@ -512,15 +554,80 @@ impl<'a> Parser<'a> {
         Ok(Statement::Data { values })
     }
 
-    /// Parses a READ statement: `READ variable {, variable}`.
+    /// Parses a READ statement: `READ variable[(subscripts)] {, variable[(subscripts)]}`.
     fn parse_read(&mut self) -> Result<Statement, String> {
         let mut variables = Vec::new();
-        variables.push(self.expect_identifier()?);
+        let name = self.expect_identifier()?;
+        let indices = self.parse_optional_subscripts()?;
+        variables.push((name, indices));
         while *self.peek() == Token::Comma {
             self.advance();
-            variables.push(self.expect_identifier()?);
+            let name = self.expect_identifier()?;
+            let indices = self.parse_optional_subscripts()?;
+            variables.push((name, indices));
         }
         Ok(Statement::Read { variables })
+    }
+
+    /// Parses optional subscript list `(expr, expr, ...)` after a variable name.
+    /// Returns an empty vector if no `(` follows.
+    fn parse_optional_subscripts(&mut self) -> Result<Vec<Expr>, String> {
+        if *self.peek() == Token::LeftParen {
+            self.advance();
+            let mut indices = Vec::new();
+            indices.push(self.parse_expression()?);
+            while *self.peek() == Token::Comma {
+                self.advance();
+                indices.push(self.parse_expression()?);
+            }
+            if *self.peek() != Token::RightParen {
+                return Err(self.error_with_context("Expected ')' after subscripts".to_string()));
+            }
+            self.advance();
+            Ok(indices)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Parses a DIM statement: `DIM variable(subscripts) [, variable(subscripts)]...`.
+    fn parse_dim(&mut self) -> Result<Statement, String> {
+        let mut arrays = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            if *self.peek() != Token::LeftParen {
+                return Err(self.error_with_context("Expected '(' after array name in DIM".to_string()));
+            }
+            self.advance();
+            let mut dims = Vec::new();
+            dims.push(self.parse_expression()?);
+            while *self.peek() == Token::Comma {
+                self.advance();
+                dims.push(self.parse_expression()?);
+            }
+            if *self.peek() != Token::RightParen {
+                return Err(self.error_with_context("Expected ')' in DIM".to_string()));
+            }
+            self.advance();
+            arrays.push((name, dims));
+            if *self.peek() == Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(Statement::Dim { arrays })
+    }
+
+    /// Parses an ERASE statement: `ERASE arrayname [, arrayname]...`.
+    fn parse_erase(&mut self) -> Result<Statement, String> {
+        let mut arrays = Vec::new();
+        arrays.push(self.expect_identifier()?);
+        while *self.peek() == Token::Comma {
+            self.advance();
+            arrays.push(self.expect_identifier()?);
+        }
+        Ok(Statement::Erase { arrays })
     }
 
     /// Parses a RESTORE statement: `RESTORE [line_number]`.
@@ -562,6 +669,7 @@ mod tests {
             stmt,
             Statement::Let {
                 variable: "X".to_string(),
+                indices: vec![],
                 expression: Expr::Number(5.0),
             }
         );
@@ -574,6 +682,7 @@ mod tests {
             stmt,
             Statement::Let {
                 variable: "X".to_string(),
+                indices: vec![],
                 expression: Expr::Number(5.0),
             }
         );
@@ -586,6 +695,7 @@ mod tests {
             stmt,
             Statement::Let {
                 variable: "C".to_string(),
+                indices: vec![],
                 expression: Expr::BinaryOp {
                     op: BinOp::Mul,
                     left: Box::new(Expr::BinaryOp {
@@ -733,6 +843,7 @@ mod tests {
             Statement::Input {
                 prompt: None,
                 variable: "N$".to_string(),
+                indices: vec![],
             }
         );
     }
@@ -745,6 +856,7 @@ mod tests {
             Statement::Input {
                 prompt: Some("GUESS (1-10): ".to_string()),
                 variable: "G".to_string(),
+                indices: vec![],
             }
         );
     }
@@ -816,6 +928,7 @@ mod tests {
             prog.lines[0].statements[0],
             Statement::Let {
                 variable: "ISPRIME".to_string(),
+                indices: vec![],
                 expression: Expr::Number(0.0),
             }
         );
@@ -1203,7 +1316,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Read {
-                variables: vec!["A".to_string()],
+                variables: vec![("A".to_string(), vec![])],
             }
         );
     }
@@ -1214,7 +1327,11 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Read {
-                variables: vec!["A".to_string(), "B$".to_string(), "C".to_string()],
+                variables: vec![
+                    ("A".to_string(), vec![]),
+                    ("B$".to_string(), vec![]),
+                    ("C".to_string(), vec![]),
+                ],
             }
         );
     }
@@ -1238,5 +1355,136 @@ mod tests {
         assert_eq!(prog.lines[0].statements.len(), 2);
         assert!(matches!(prog.lines[0].statements[0], Statement::Let { .. }));
         assert!(matches!(prog.lines[0].statements[1], Statement::Data { .. }));
+    }
+
+    // --- DIM / ERASE / Array parser tests ---
+
+    #[test]
+    fn test_parse_dim_single_dimension() {
+        let stmt = parse_single_statement("10 DIM A(10)");
+        assert_eq!(
+            stmt,
+            Statement::Dim {
+                arrays: vec![("A".to_string(), vec![Expr::Number(10.0)])],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_multi_dimension() {
+        let stmt = parse_single_statement("10 DIM B(3, 4)");
+        assert_eq!(
+            stmt,
+            Statement::Dim {
+                arrays: vec![("B".to_string(), vec![Expr::Number(3.0), Expr::Number(4.0)])],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_multiple_arrays() {
+        let stmt = parse_single_statement("10 DIM A(5), B(3, 4)");
+        assert_eq!(
+            stmt,
+            Statement::Dim {
+                arrays: vec![
+                    ("A".to_string(), vec![Expr::Number(5.0)]),
+                    ("B".to_string(), vec![Expr::Number(3.0), Expr::Number(4.0)]),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_string_array() {
+        let stmt = parse_single_statement("10 DIM N$(20)");
+        assert_eq!(
+            stmt,
+            Statement::Dim {
+                arrays: vec![("N$".to_string(), vec![Expr::Number(20.0)])],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_expression_subscript() {
+        let stmt = parse_single_statement("10 DIM A(N + 1)");
+        assert!(matches!(stmt, Statement::Dim { .. }));
+        if let Statement::Dim { arrays } = stmt {
+            assert_eq!(arrays.len(), 1);
+            assert_eq!(arrays[0].0, "A");
+            assert!(matches!(arrays[0].1[0], Expr::BinaryOp { .. }));
+        }
+    }
+
+    #[test]
+    fn test_parse_erase_single() {
+        let stmt = parse_single_statement("10 ERASE A");
+        assert_eq!(
+            stmt,
+            Statement::Erase {
+                arrays: vec!["A".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_erase_multiple() {
+        let stmt = parse_single_statement("10 ERASE A, B, C$");
+        assert_eq!(
+            stmt,
+            Statement::Erase {
+                arrays: vec!["A".to_string(), "B".to_string(), "C$".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_let_array_element() {
+        let stmt = parse_single_statement("10 A(1) = 5");
+        assert_eq!(
+            stmt,
+            Statement::Let {
+                variable: "A".to_string(),
+                indices: vec![Expr::Number(1.0)],
+                expression: Expr::Number(5.0),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_let_array_multi_index() {
+        let stmt = parse_single_statement("10 LET B(2, 3) = 42");
+        assert_eq!(
+            stmt,
+            Statement::Let {
+                variable: "B".to_string(),
+                indices: vec![Expr::Number(2.0), Expr::Number(3.0)],
+                expression: Expr::Number(42.0),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_read_array_element() {
+        let stmt = parse_single_statement("10 READ A(1), B");
+        assert_eq!(
+            stmt,
+            Statement::Read {
+                variables: vec![("A".to_string(), vec![Expr::Number(1.0)]), ("B".to_string(), vec![]),],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_error_missing_paren() {
+        let err = parse_program_err("10 DIM A");
+        assert!(err.contains("Expected '(' after array name in DIM"));
+    }
+
+    #[test]
+    fn test_parse_dim_error_missing_rparen() {
+        let err = parse_program_err("10 DIM A(10");
+        assert!(err.contains("Expected ')' in DIM"));
     }
 }

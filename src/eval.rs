@@ -99,9 +99,74 @@ impl std::fmt::Display for Value {
     }
 }
 
-/// Expression evaluator with a variable store and random number generator.
+/// A BASIC array with dimension sizes and flat storage.
+#[derive(Debug, Clone)]
+pub struct Array {
+    /// Size of each dimension (max subscript + 1, since subscripts are 0-based).
+    pub dimensions: Vec<usize>,
+    /// Flat storage for all elements, row-major order.
+    pub data: Vec<Value>,
+}
+
+impl Array {
+    /// Creates a new array with the given dimension sizes, initialized to zero (numeric) or empty string.
+    pub fn new(dimensions: Vec<usize>, is_string: bool) -> Self {
+        let total: usize = dimensions.iter().product();
+        let default = if is_string {
+            Value::String(String::new())
+        } else {
+            Value::Number(0.0)
+        };
+        Array {
+            dimensions,
+            data: vec![default; total],
+        }
+    }
+
+    /// Computes the flat index from multi-dimensional subscripts.
+    /// Returns an error if any subscript is out of range.
+    fn flat_index(&self, subscripts: &[usize]) -> Result<usize, String> {
+        if subscripts.len() != self.dimensions.len() {
+            return Err(format!(
+                "Wrong number of subscripts: expected {}, got {}",
+                self.dimensions.len(),
+                subscripts.len()
+            ));
+        }
+        let mut index = 0;
+        let mut multiplier = 1;
+        for i in (0..subscripts.len()).rev() {
+            if subscripts[i] >= self.dimensions[i] {
+                return Err(format!(
+                    "Subscript out of range: {} (max {})",
+                    subscripts[i],
+                    self.dimensions[i] - 1
+                ));
+            }
+            index += subscripts[i] * multiplier;
+            multiplier *= self.dimensions[i];
+        }
+        Ok(index)
+    }
+
+    /// Gets an element by multi-dimensional subscripts.
+    pub fn get(&self, subscripts: &[usize]) -> Result<&Value, String> {
+        let idx = self.flat_index(subscripts)?;
+        Ok(&self.data[idx])
+    }
+
+    /// Sets an element by multi-dimensional subscripts.
+    pub fn set(&mut self, subscripts: &[usize], value: Value) -> Result<(), String> {
+        let idx = self.flat_index(subscripts)?;
+        self.data[idx] = value;
+        Ok(())
+    }
+}
+
+/// Expression evaluator with a variable store, array store, and random number generator.
 pub struct Evaluator {
     pub variables: HashMap<String, Value>,
+    pub arrays: HashMap<String, Array>,
     pub user_functions: HashMap<String, UserFunction>,
     rng: rand::rngs::ThreadRng,
 }
@@ -111,9 +176,48 @@ impl Evaluator {
     pub fn new() -> Self {
         Evaluator {
             variables: HashMap::new(),
+            arrays: HashMap::new(),
             user_functions: HashMap::new(),
             rng: rand::thread_rng(),
         }
+    }
+
+    /// Evaluates subscript expressions and converts them to usize indices.
+    pub fn eval_subscripts(&mut self, indices: &[Expr]) -> Result<Vec<usize>, String> {
+        let mut subs = Vec::with_capacity(indices.len());
+        for idx_expr in indices {
+            let val = self.eval_expr(idx_expr)?.as_number()?;
+            let idx = val as i64;
+            if idx < 0 {
+                return Err(format!("Subscript out of range: {}", idx));
+            }
+            subs.push(idx as usize);
+        }
+        Ok(subs)
+    }
+
+    /// Gets an array element, auto-dimensioning the array if needed (default max subscript 10).
+    pub fn get_array_element(&mut self, name: &str, subscripts: &[usize]) -> Result<Value, String> {
+        if !self.arrays.contains_key(name) {
+            // Auto-dimension with max subscript 10 for each dimension
+            let dims: Vec<usize> = subscripts.iter().map(|_| 11).collect();
+            let is_string = name.ends_with('$');
+            self.arrays.insert(name.to_string(), Array::new(dims, is_string));
+        }
+        let arr = self.arrays.get(name).unwrap();
+        arr.get(subscripts).cloned()
+    }
+
+    /// Sets an array element, auto-dimensioning the array if needed (default max subscript 10).
+    pub fn set_array_element(&mut self, name: &str, subscripts: &[usize], value: Value) -> Result<(), String> {
+        if !self.arrays.contains_key(name) {
+            // Auto-dimension with max subscript 10 for each dimension
+            let dims: Vec<usize> = subscripts.iter().map(|_| 11).collect();
+            let is_string = name.ends_with('$');
+            self.arrays.insert(name.to_string(), Array::new(dims, is_string));
+        }
+        let arr = self.arrays.get_mut(name).unwrap();
+        arr.set(subscripts, value)
     }
 
     /// Evaluates an expression tree using an explicit work stack and value stack,
@@ -631,6 +735,21 @@ impl Evaluator {
             }
 
             _ => {
+                // Check for array access first
+                if self.arrays.contains_key(name) {
+                    let subscripts: Result<Vec<usize>, String> = args
+                        .iter()
+                        .map(|a| {
+                            let n = a.as_number()?;
+                            let i = n as i64;
+                            if i < 0 {
+                                return Err(format!("Subscript out of range: {}", i));
+                            }
+                            Ok(i as usize)
+                        })
+                        .collect();
+                    return self.get_array_element(name, &subscripts?);
+                }
                 // Check for user-defined FN functions
                 if let Some(func) = self.user_functions.get(name).cloned() {
                     if args.len() != func.params.len() {
@@ -666,6 +785,22 @@ impl Evaluator {
                     }
                     result
                 } else {
+                    // Auto-dimension array if subscripts look like array access
+                    // (not a known function and not a user function)
+                    if !args.is_empty() {
+                        let subscripts: Result<Vec<usize>, String> = args
+                            .iter()
+                            .map(|a| {
+                                let n = a.as_number()?;
+                                let i = n as i64;
+                                if i < 0 {
+                                    return Err(format!("Subscript out of range: {}", i));
+                                }
+                                Ok(i as usize)
+                            })
+                            .collect();
+                        return self.get_array_element(name, &subscripts?);
+                    }
                     Err(format!("Unknown function: {}", name))
                 }
             }
@@ -1026,8 +1161,18 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_unknown_function() {
+    fn test_eval_unknown_name_with_args_auto_dimensions_array() {
+        // In GW-BASIC, FOO(1) auto-dimensions array FOO with default max subscript 10
         let tokens = Lexer::new("FOO(1)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        assert_eq!(evaluator.eval_expr(&expr).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_unknown_function_no_args() {
+        let tokens = Lexer::new("FOO()").tokenize();
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
         let mut evaluator = Evaluator::new();
@@ -2533,5 +2678,121 @@ mod tests {
         } else {
             panic!("Expected number");
         }
+    }
+
+    // --- Array tests ---
+
+    #[test]
+    fn test_array_new_numeric() {
+        let arr = Array::new(vec![5], false);
+        assert_eq!(arr.dimensions, vec![5]);
+        assert_eq!(arr.data.len(), 5);
+        assert_eq!(arr.data[0], Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_array_new_string() {
+        let arr = Array::new(vec![3], true);
+        assert_eq!(arr.data.len(), 3);
+        assert_eq!(arr.data[0], Value::String(String::new()));
+    }
+
+    #[test]
+    fn test_array_new_multidimensional() {
+        let arr = Array::new(vec![3, 4], false);
+        assert_eq!(arr.data.len(), 12);
+    }
+
+    #[test]
+    fn test_array_get_set() {
+        let mut arr = Array::new(vec![5], false);
+        arr.set(&[2], Value::Number(42.0)).unwrap();
+        assert_eq!(*arr.get(&[2]).unwrap(), Value::Number(42.0));
+        assert_eq!(*arr.get(&[0]).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_array_multidim_get_set() {
+        let mut arr = Array::new(vec![3, 4], false);
+        arr.set(&[1, 2], Value::Number(99.0)).unwrap();
+        assert_eq!(*arr.get(&[1, 2]).unwrap(), Value::Number(99.0));
+        assert_eq!(*arr.get(&[0, 0]).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_array_subscript_out_of_range() {
+        let arr = Array::new(vec![5], false);
+        assert!(arr.get(&[5]).is_err());
+        assert!(arr.get(&[10]).is_err());
+    }
+
+    #[test]
+    fn test_array_wrong_dimension_count() {
+        let arr = Array::new(vec![3, 4], false);
+        assert!(arr.get(&[1]).is_err());
+        assert!(arr.get(&[1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn test_evaluator_set_get_array_element() {
+        let mut eval = Evaluator::new();
+        eval.set_array_element("A", &[3], Value::Number(7.0)).unwrap();
+        assert_eq!(eval.get_array_element("A", &[3]).unwrap(), Value::Number(7.0));
+        // Auto-dimensioned to 11 elements (0..=10)
+        assert_eq!(eval.arrays["A"].dimensions, vec![11]);
+    }
+
+    #[test]
+    fn test_evaluator_array_auto_dimension() {
+        let mut eval = Evaluator::new();
+        // Accessing without DIM should auto-create with default size 11
+        let val = eval.get_array_element("X", &[5]).unwrap();
+        assert_eq!(val, Value::Number(0.0));
+        assert!(eval.arrays.contains_key("X"));
+    }
+
+    #[test]
+    fn test_evaluator_string_array() {
+        let mut eval = Evaluator::new();
+        eval.set_array_element("N$", &[1], Value::String("HELLO".to_string()))
+            .unwrap();
+        assert_eq!(
+            eval.get_array_element("N$", &[1]).unwrap(),
+            Value::String("HELLO".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_access_in_expression() {
+        // A(1) in an expression should work as array access
+        let mut evaluator = Evaluator::new();
+        evaluator.set_array_element("A", &[1], Value::Number(42.0)).unwrap();
+        let tokens = Lexer::new("A(1)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        assert_eq!(evaluator.eval_expr(&expr).unwrap(), Value::Number(42.0));
+    }
+
+    #[test]
+    fn test_array_3d() {
+        let mut arr = Array::new(vec![2, 3, 4], false);
+        arr.set(&[1, 2, 3], Value::Number(123.0)).unwrap();
+        assert_eq!(*arr.get(&[1, 2, 3]).unwrap(), Value::Number(123.0));
+        assert_eq!(*arr.get(&[0, 0, 0]).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_subscripts() {
+        let mut eval = Evaluator::new();
+        let exprs = vec![Expr::Number(2.0), Expr::Number(3.0)];
+        let subs = eval.eval_subscripts(&exprs).unwrap();
+        assert_eq!(subs, vec![2, 3]);
+    }
+
+    #[test]
+    fn test_eval_subscripts_negative_error() {
+        let mut eval = Evaluator::new();
+        let exprs = vec![Expr::Number(-1.0)];
+        assert!(eval.eval_subscripts(&exprs).is_err());
     }
 }
