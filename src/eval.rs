@@ -243,7 +243,14 @@ impl Evaluator {
                             let result = self.eval_expr(&func.body)?;
                             values.push(result);
                         } else {
-                            return Err(format!("Undefined variable: {}", name));
+                            // GW-BASIC auto-initializes variables to 0 or ""
+                            let default = if name.ends_with('$') {
+                                Value::String(String::new())
+                            } else {
+                                Value::Number(0.0)
+                            };
+                            self.variables.insert(name.clone(), default.clone());
+                            values.push(default);
                         }
                     }
                     Expr::UnaryMinus(inner) => {
@@ -1200,12 +1207,23 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_undefined_variable() {
+    fn test_eval_undefined_variable_auto_initializes() {
         let tokens = Lexer::new("UNDEFINED").tokenize();
         let mut parser = ExprParser::new(&tokens);
         let expr = parser.parse_expression().unwrap();
         let mut evaluator = Evaluator::new();
-        assert!(evaluator.eval_expr(&expr).is_err());
+        // GW-BASIC auto-initializes undefined numeric variables to 0
+        assert_eq!(evaluator.eval_expr(&expr).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_eval_undefined_string_variable_auto_initializes() {
+        let tokens = Lexer::new("UNDEFINED$").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let mut evaluator = Evaluator::new();
+        // GW-BASIC auto-initializes undefined string variables to ""
+        assert_eq!(evaluator.eval_expr(&expr).unwrap(), Value::String(String::new()));
     }
 
     #[test]

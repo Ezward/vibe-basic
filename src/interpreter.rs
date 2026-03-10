@@ -1114,10 +1114,16 @@ mod tests {
 
     #[test]
     fn test_runtime_error_includes_context() {
-        let result = run_program("10 PRINT UNDEFINED_VAR\n20 END\n");
+        let result = run_program("10 PRINT 1/0\n20 END\n");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("at line"));
+    }
+
+    #[test]
+    fn test_undefined_variable_auto_initializes() {
+        let output = run_program("10 PRINT X\n20 PRINT X$\n30 END\n").unwrap();
+        assert_eq!(output, " 0 \n\n");
     }
 
     #[test]

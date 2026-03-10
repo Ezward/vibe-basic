@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_debugger_error_stays_alive() {
-        let output = run_debugger("10 PRINT X\n20 END\n", "STEP\nQUIT\n");
+        let output = run_debugger("10 PRINT 1/0\n20 END\n", "STEP\nQUIT\n");
         assert!(output.contains("Runtime error:"));
         // Debugger should still be alive (we see the next prompt)
         assert!(output.contains("[DBG line 10]>"));
@@ -701,13 +701,13 @@ mod tests {
 
     #[test]
     fn test_debugger_let_error() {
-        let output = run_debugger("10 END\n", "LET X = UNDEFINED\nQUIT\n");
+        let output = run_debugger("10 END\n", "LET X = 1/0\nQUIT\n");
         assert!(output.contains("Error:"));
     }
 
     #[test]
     fn test_debugger_print_error() {
-        let output = run_debugger("10 END\n", "PRINT UNDEFINED\nQUIT\n");
+        let output = run_debugger("10 END\n", "PRINT 1/0\nQUIT\n");
         assert!(output.contains("Error:"));
     }
 
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_debugger_run_with_error() {
-        let output = run_debugger("10 PRINT UNDEFINED\n20 END\n", "RUN\nQUIT\n");
+        let output = run_debugger("10 PRINT 1/0\n20 END\n", "RUN\nQUIT\n");
         assert!(output.contains("Runtime error:"));
     }
 
