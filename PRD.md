@@ -8,17 +8,23 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
 2. Next, create a stack-based looping evaluator (rather than a recursive evaluator) that can evaluate an expression parse tree and return a value.
   - include unit tests that check various kinds of expressions and their evaluation.
 
-3. Next, create a parser for basic statements and programs that parses them into an abstract syntax tree.
+3. Make sure all the built-in functions specified in section 10 (10. Built-in Functions) of ./vibe-basic-syntax.txt are implemented.  Add unit tests for all functions.
+  - create an example program called ./examples/strings.bas that tests all the string functions.
+  - create an example program called ./examples/math.bas that tests all the numeric functions.
+
+4. Next, create a parser for basic statements and programs that parses them into an abstract syntax tree.
   - include unit tests that check the structure of the abstract syntax tree.
   - The statement parser should skip whitespace at the beginning of a line
   - The statement parser should ignore empty lines.
   - Parse errors should show the 1-based file line number and full source text for the line that caused the error.
 
-4. Next, create an interpreter for basic programs that will run the program and write output to stdout.
+5. Next, create an interpreter for basic programs that will run the program and write output to stdout.
   - Runtime errors should show the 1-based file line number and full source text for the line that caused the error.
   - include unit tests that run example programs and checks their output.
 
-5. Next, add a debug mode to the interpreter.
+6. Make sure the DEF FN user definable function syntax is implemented as specified in section 8 (8. DEF FN (User-Defined Functions)) of vibe-basic-syntax.txt.  Add unit tests.
+
+7. Next, add a debug mode to the interpreter.
   - The command line should support opening the program in debug mode by providing the --debug argument.
   - The debug mode should open the file, but not immediately execute it; instead it should accept debug commands and execute them.  The debug commands are:
     - RUN: this debugger command runs the program from the current line, initially ignoring any breakpoint, until it either finishes or errors or hits a breakpoint.
@@ -38,7 +44,7 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
     - HELP: Print the list of debugging commands and how they are used.
 
 
-
+8. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
 
 Generally:
 
