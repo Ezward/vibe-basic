@@ -66,6 +66,8 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             return Ok(());
         }
 
+        self.interpreter.collect_data(program)?;
+
         writeln!(
             self.interpreter.output,
             "BASIC Debugger. Type HELP for a list of commands."

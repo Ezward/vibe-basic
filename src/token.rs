@@ -29,6 +29,9 @@ pub enum Token {
     Rem(String),
     End,
     Def,
+    Data,
+    Read,
+    Restore,
     // Logical operators
     And,
     Or,
@@ -175,6 +178,9 @@ impl Lexer {
             "NEXT" => Token::Next,
             "END" => Token::End,
             "DEF" => Token::Def,
+            "DATA" => Token::Data,
+            "READ" => Token::Read,
+            "RESTORE" => Token::Restore,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
@@ -555,5 +561,46 @@ mod tests {
     fn test_tokenize_tabs_and_carriage_returns() {
         let tokens = Lexer::new("\t\r10").tokenize();
         assert_eq!(tokens, vec![Token::Number(10.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_data_keyword() {
+        let tokens = Lexer::new("DATA").tokenize();
+        assert_eq!(tokens, vec![Token::Data, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_read_keyword() {
+        let tokens = Lexer::new("READ").tokenize();
+        assert_eq!(tokens, vec![Token::Read, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_restore_keyword() {
+        let tokens = Lexer::new("RESTORE").tokenize();
+        assert_eq!(tokens, vec![Token::Restore, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_data_read_restore_case_insensitive() {
+        let tokens = Lexer::new("data read restore").tokenize();
+        assert_eq!(tokens, vec![Token::Data, Token::Read, Token::Restore, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_data_statement() {
+        let tokens = Lexer::new("DATA 10, 20, \"HELLO\"").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Data,
+                Token::Number(10.0),
+                Token::Comma,
+                Token::Number(20.0),
+                Token::Comma,
+                Token::StringLiteral("HELLO".to_string()),
+                Token::Eof,
+            ]
+        );
     }
 }

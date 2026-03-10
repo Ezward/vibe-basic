@@ -41,6 +41,15 @@ pub enum Statement {
     Next {
         variable: Option<String>,
     },
+    Data {
+        values: Vec<Expr>,
+    },
+    Read {
+        variables: Vec<String>,
+    },
+    Restore {
+        line_number: Option<u32>,
+    },
     Rem(String),
     End,
     DefFn {
@@ -260,6 +269,18 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_def_fn()
             }
+            Token::Data => {
+                self.advance();
+                self.parse_data()
+            }
+            Token::Read => {
+                self.advance();
+                self.parse_read()
+            }
+            Token::Restore => {
+                self.advance();
+                self.parse_restore()
+            }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
                 self.parse_let_body()
@@ -446,6 +467,71 @@ impl<'a> Parser<'a> {
             params,
             body,
         })
+    }
+
+    /// Parses a DATA statement: `DATA constant {, constant}`.
+    /// Each constant is either a numeric literal, a string literal, or an unquoted string
+    /// (any non-separator text treated as a string). Unquoted strings are delimited by commas,
+    /// colons, or end-of-line.
+    fn parse_data(&mut self) -> Result<Statement, String> {
+        let mut values = Vec::new();
+        loop {
+            if self.at_statement_end() {
+                break;
+            }
+            match self.peek().clone() {
+                Token::Number(n) => {
+                    self.advance();
+                    // Check if this is a negative number: if followed by nothing special, it's just a number
+                    values.push(Expr::Number(n));
+                }
+                Token::Minus => {
+                    // Negative number in DATA
+                    self.advance();
+                    let n = self.expect_number()?;
+                    values.push(Expr::Number(-n));
+                }
+                Token::StringLiteral(s) => {
+                    self.advance();
+                    values.push(Expr::StringLiteral(s));
+                }
+                _ => {
+                    // Unquoted string: read identifier tokens as string constants
+                    // In GW-BASIC, unquoted DATA items that aren't numbers are treated as strings
+                    let name = self.expect_identifier()?;
+                    values.push(Expr::StringLiteral(name));
+                }
+            }
+            // Expect comma between values or end of statement
+            if *self.peek() == Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(Statement::Data { values })
+    }
+
+    /// Parses a READ statement: `READ variable {, variable}`.
+    fn parse_read(&mut self) -> Result<Statement, String> {
+        let mut variables = Vec::new();
+        variables.push(self.expect_identifier()?);
+        while *self.peek() == Token::Comma {
+            self.advance();
+            variables.push(self.expect_identifier()?);
+        }
+        Ok(Statement::Read { variables })
+    }
+
+    /// Parses a RESTORE statement: `RESTORE [line_number]`.
+    fn parse_restore(&mut self) -> Result<Statement, String> {
+        let line_number = if let Token::Number(n) = self.peek().clone() {
+            self.advance();
+            Some(n as u32)
+        } else {
+            None
+        };
+        Ok(Statement::Restore { line_number })
     }
 }
 
@@ -1035,5 +1121,122 @@ mod tests {
             assert_eq!(name, "FN");
             assert!(params.is_empty());
         }
+    }
+
+    // --- DATA / READ / RESTORE parser tests ---
+
+    #[test]
+    fn test_parse_data_numbers() {
+        let stmt = parse_single_statement("10 DATA 1, 2, 3");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![Expr::Number(1.0), Expr::Number(2.0), Expr::Number(3.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_data_strings() {
+        let stmt = parse_single_statement("10 DATA \"HELLO\", \"WORLD\"");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![
+                    Expr::StringLiteral("HELLO".to_string()),
+                    Expr::StringLiteral("WORLD".to_string()),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_data_mixed() {
+        let stmt = parse_single_statement("10 DATA \"ALICE\", 25");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![Expr::StringLiteral("ALICE".to_string()), Expr::Number(25.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_data_negative_number() {
+        let stmt = parse_single_statement("10 DATA -5, 10");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![Expr::Number(-5.0), Expr::Number(10.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_data_unquoted_string() {
+        let stmt = parse_single_statement("10 DATA HELLO, WORLD");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![
+                    Expr::StringLiteral("HELLO".to_string()),
+                    Expr::StringLiteral("WORLD".to_string()),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_data_single_value() {
+        let stmt = parse_single_statement("10 DATA 42");
+        assert_eq!(
+            stmt,
+            Statement::Data {
+                values: vec![Expr::Number(42.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_read_single() {
+        let stmt = parse_single_statement("10 READ A");
+        assert_eq!(
+            stmt,
+            Statement::Read {
+                variables: vec!["A".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_read_multiple() {
+        let stmt = parse_single_statement("10 READ A, B$, C");
+        assert_eq!(
+            stmt,
+            Statement::Read {
+                variables: vec!["A".to_string(), "B$".to_string(), "C".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_restore_no_line() {
+        let stmt = parse_single_statement("10 RESTORE");
+        assert_eq!(stmt, Statement::Restore { line_number: None });
+    }
+
+    #[test]
+    fn test_parse_restore_with_line() {
+        let stmt = parse_single_statement("10 RESTORE 100");
+        assert_eq!(stmt, Statement::Restore { line_number: Some(100) });
+    }
+
+    #[test]
+    fn test_parse_data_on_multi_statement_line() {
+        let prog = parse_program("10 X = 5 : DATA 10, 20\n");
+        assert_eq!(prog.lines.len(), 1);
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Let { .. }));
+        assert!(matches!(prog.lines[0].statements[1], Statement::Data { .. }));
     }
 }

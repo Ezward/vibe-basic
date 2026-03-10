@@ -43,8 +43,9 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
     - QUIT: This debugger command exits the program and quits back to the operating system.
     - HELP: Print the list of debugging commands and how they are used.
 
+8. GW-BASIC supports a DATA statement and a READ statement to read the data and a RESTORE statement that allows DATA statements to be reread from a specified line.   See https://hwiegman.home.xs4all.nl/gw-man/DATA.html and https://hwiegman.home.xs4all.nl/gw-man/READ.html and https://hwiegman.home.xs4all.nl/gw-man/RESTORE.html respectively.  Implement these statements and related unit tests.  Implement an example program that tests these statements.
 
-8. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
+9. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
 
 Generally:
 

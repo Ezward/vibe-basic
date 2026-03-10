@@ -20,6 +20,13 @@ struct ForState {
     line_index: usize,
 }
 
+/// An entry in the collected DATA pool, recording its originating line number.
+#[derive(Debug, Clone)]
+struct DataEntry {
+    value: Value,
+    line_number: u32,
+}
+
 /// Runtime interpreter for BASIC programs, parameterized over input and output streams.
 pub struct Interpreter<R: BufRead, W: Write> {
     pub(crate) evaluator: Evaluator,
@@ -27,6 +34,8 @@ pub struct Interpreter<R: BufRead, W: Write> {
     pub(crate) output: W,
     for_stack: Vec<ForState>,
     column: usize,
+    data_pool: Vec<DataEntry>,
+    data_pointer: usize,
 }
 
 impl<R: BufRead, W: Write> Interpreter<R, W> {
@@ -38,6 +47,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             output,
             for_stack: Vec::new(),
             column: 0,
+            data_pool: Vec::new(),
+            data_pointer: 0,
         }
     }
 
@@ -49,6 +60,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             return Ok(());
         }
 
+        self.collect_data(program)?;
         let mut line_idx = 0;
 
         while line_idx < program.lines.len() {
@@ -246,9 +258,79 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 );
                 Ok(StmtResult::Continue)
             }
+            Statement::Data { .. } => {
+                // DATA statements are non-executable; values are collected at program start.
+                Ok(StmtResult::Continue)
+            }
+            Statement::Read { variables } => {
+                for var_name in variables {
+                    if self.data_pointer >= self.data_pool.len() {
+                        return Err("Out of DATA".to_string());
+                    }
+                    let entry = self.data_pool[self.data_pointer].clone();
+                    self.data_pointer += 1;
+                    // Assign value, converting types as needed
+                    let value = if var_name.ends_with('$') {
+                        // String variable expects a string value
+                        match entry.value {
+                            Value::String(_) => entry.value,
+                            Value::Number(n) => Value::String(format!("{}", Value::Number(n))),
+                        }
+                    } else {
+                        // Numeric variable expects a number
+                        match &entry.value {
+                            Value::Number(_) => entry.value,
+                            Value::String(s) => {
+                                if let Ok(n) = s.parse::<f64>() {
+                                    Value::Number(n)
+                                } else {
+                                    return Err(format!("Type mismatch: READ expected number, got \"{}\"", s));
+                                }
+                            }
+                        }
+                    };
+                    self.evaluator.variables.insert(var_name.clone(), value);
+                }
+                Ok(StmtResult::Continue)
+            }
+            Statement::Restore { line_number } => {
+                if let Some(target) = line_number {
+                    // Find the first data entry from the specified line number
+                    if let Some(idx) = self.data_pool.iter().position(|e| e.line_number >= *target) {
+                        self.data_pointer = idx;
+                    } else {
+                        // No DATA at or after that line; reset to end (next READ will fail)
+                        self.data_pointer = self.data_pool.len();
+                    }
+                } else {
+                    self.data_pointer = 0;
+                }
+                Ok(StmtResult::Continue)
+            }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
         }
+    }
+
+    /// Scans all DATA statements in program-line-number order and collects their
+    /// constant values into a flat pool for READ to consume.
+    pub(crate) fn collect_data(&mut self, program: &Program) -> Result<(), String> {
+        self.data_pool.clear();
+        self.data_pointer = 0;
+        for line in &program.lines {
+            for stmt in &line.statements {
+                if let Statement::Data { values } = stmt {
+                    for expr in values {
+                        let value = self.evaluator.eval_expr(expr)?;
+                        self.data_pool.push(DataEntry {
+                            value,
+                            line_number: line.line_number,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Executes a PRINT statement. Commas advance to the next 14-character tab zone,
@@ -1427,5 +1509,297 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expects 2 argument(s)"));
+    }
+
+    // --- DATA / READ / RESTORE tests ---
+
+    #[test]
+    fn test_data_read_basic() {
+        let output = run_program(
+            "\
+10 DATA 10, 20, 30
+20 READ A, B, C
+30 PRINT A; B; C
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10  20  30 \n");
+    }
+
+    #[test]
+    fn test_data_read_strings() {
+        let output = run_program(
+            "\
+10 DATA \"HELLO\", \"WORLD\"
+20 READ A$, B$
+30 PRINT A$; \" \"; B$
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "HELLO WORLD\n");
+    }
+
+    #[test]
+    fn test_data_read_mixed_types() {
+        let output = run_program(
+            "\
+10 DATA \"ALICE\", 25, \"BOB\", 30
+20 READ N1$, A1, N2$, A2
+30 PRINT N1$; A1
+40 PRINT N2$; A2
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ALICE 25 \nBOB 30 \n");
+    }
+
+    #[test]
+    fn test_data_across_multiple_lines() {
+        let output = run_program(
+            "\
+10 DATA 1, 2, 3
+20 DATA 4, 5, 6
+30 READ A, B, C, D, E, F
+40 PRINT A; B; C; D; E; F
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3  4  5  6 \n");
+    }
+
+    #[test]
+    fn test_data_read_in_loop() {
+        let output = run_program(
+            "\
+10 DATA 3.08, 5.19, 3.12, 3.98, 4.24
+20 FOR I = 1 TO 5
+30 READ A
+40 PRINT A;
+50 NEXT I
+60 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 3.08  5.19  3.12  3.98  4.24 ");
+    }
+
+    #[test]
+    fn test_data_out_of_data_error() {
+        let result = run_program(
+            "\
+10 DATA 1, 2
+20 READ A, B, C
+30 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Out of DATA"));
+    }
+
+    #[test]
+    fn test_restore_resets_pointer() {
+        let output = run_program(
+            "\
+10 DATA 57, 68, 79
+20 READ A, B, C
+30 RESTORE
+40 READ D, E, F
+50 PRINT A; B; C
+60 PRINT D; E; F
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 57  68  79 \n 57  68  79 \n");
+    }
+
+    #[test]
+    fn test_restore_with_line_number() {
+        let output = run_program(
+            "\
+10 DATA 10, 20
+20 DATA 30, 40
+30 READ A, B, C, D
+40 RESTORE 20
+50 READ E, F
+60 PRINT A; B; C; D
+70 PRINT E; F
+80 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 10  20  30  40 \n 30  40 \n");
+    }
+
+    #[test]
+    fn test_restore_without_data_at_line() {
+        // RESTORE to a line after all DATA; next READ should fail
+        let result = run_program(
+            "\
+10 DATA 1, 2
+20 RESTORE 100
+30 READ A
+40 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Out of DATA"));
+    }
+
+    #[test]
+    fn test_data_negative_numbers() {
+        let output = run_program(
+            "\
+10 DATA -5, -3.14, 0, 42
+20 READ A, B, C, D
+30 PRINT A; B; C; D
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "-5 -3.14  0  42 \n");
+    }
+
+    #[test]
+    fn test_data_not_executed_sequentially() {
+        // DATA can appear after END; it's still collected
+        let output = run_program(
+            "\
+10 READ A, B
+20 PRINT A; B
+30 END
+40 DATA 99, 88
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 99  88 \n");
+    }
+
+    #[test]
+    fn test_data_on_same_line_as_other_statements() {
+        let output = run_program(
+            "\
+10 X = 5 : DATA 10, 20
+20 READ A, B
+30 PRINT X; A; B
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 5  10  20 \n");
+    }
+
+    #[test]
+    fn test_multiple_read_statements() {
+        let output = run_program(
+            "\
+10 DATA 1, 2, 3, 4
+20 READ A
+30 READ B
+40 READ C
+50 READ D
+60 PRINT A; B; C; D
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3  4 \n");
+    }
+
+    #[test]
+    fn test_restore_and_reread_loop() {
+        let output = run_program(
+            "\
+10 DATA 10, 20, 30
+20 FOR I = 1 TO 2
+30 RESTORE
+40 READ A, B, C
+50 PRINT A + B + C;
+60 NEXT I
+70 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 60  60 ");
+    }
+
+    #[test]
+    fn test_read_type_mismatch_error() {
+        // Trying to read a non-numeric string into a numeric variable
+        let result = run_program(
+            "\
+10 DATA \"HELLO\"
+20 READ A
+30 END
+",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Type mismatch"));
+    }
+
+    #[test]
+    fn test_data_unquoted_string() {
+        // Unquoted identifiers in DATA become strings
+        let output = run_program(
+            "\
+10 DATA HELLO, WORLD
+20 READ A$, B$
+30 PRINT A$; \" \"; B$
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "HELLO WORLD\n");
+    }
+
+    #[test]
+    fn test_restore_to_first_data_line() {
+        let output = run_program(
+            "\
+10 DATA 1
+20 DATA 2
+30 READ A
+40 READ B
+50 RESTORE 10
+60 READ C
+70 PRINT A; B; C
+80 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  1 \n");
+    }
+
+    #[test]
+    fn test_data_read_single_value() {
+        let output = run_program(
+            "\
+10 DATA 42
+20 READ X
+30 PRINT X
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_data_numeric_string_to_numeric_var() {
+        // A numeric string in DATA can be read into a numeric variable
+        let output = run_program(
+            "\
+10 DATA \"3.14\"
+20 READ X
+30 PRINT X
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 3.14 \n");
     }
 }
