@@ -1,5 +1,5 @@
 100 REM *******************
-110 REM *  PIRATE ISALND  *
+110 REM *  PIRATE ISLAND  *
 120 REM *                 *
 130 REM *        BY       *
 140 REM *   DAVID MENY    *
@@ -16,7 +16,7 @@
 179 PRINT "statues or chest of gold coins from a long time ago."
 180 PRINT "  You dream and dream until the rocking of the seas wakens you on board the ship"
 185 PRINT "'The Eagle's Nest', a pirate ship!":PRINT
-190 GOSUB 15000:REM PRINT ROOM DESCRIPTION
+190 GOSUB 15000:REM PRINT SCORE
 200 GOSUB 14000:REM PRINT ROOM CONTENTS
 210 IF START=1 THEN MV=MV+1 ELSE 219
 211 IF MV=10 THEN TR(2)=RO ELSE 219
@@ -26,8 +26,8 @@
 215 PRINT "The captain pulls out his cutlass and decapitates you.":GOTO 2000
 216 PRINT "'Congradulations!! We've come ashore on ze' old Pirate Island. Now go ashore by":PRINT "the east starboard deck.' The captain then hands you a bag of silver."
 217 PRINT "'Spend it wisely. It's your payment IF you don't come back.'":TR(2)=25:A(39,2)=22:FLAG97=1:TR(14)=200
-219 PRINT:INPUT ">",A$
-220 IF A$="" THEN PRINT:PRINT "What?":GOTO 210
+219 INPUT ">",A$:PRINT
+220 IF A$="" THEN PRINT "What?":GOTO 210
 230 AS=ASC(A$)
 240 IF AS<65 OR AS>90 THEN PRINT:PRINT "I can only use capital letters, matey.":GOTO 210
 245 IF A$="LOOK UNDER JULIUS" THEN GOSUB 8010:GOTO 210
@@ -304,9 +304,7 @@
 14036 FLAG99=1:JKH=I
 14040 NEXT
 14050 RETURN
-15000 REM ROOM DESCRIPTION
-15030 PRINT "                                                                               "
-15040 PRINT RO$(RO)
+15000 REM SCORE
 15050 PRINT "Score:";SCORE
 15065 PRINT RO$(RO)
 15066 IF RO>39 THEN 15090
