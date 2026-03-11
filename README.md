@@ -10,59 +10,77 @@ The full language specification — EBNF grammar, semantic explanations, and exa
 
 | Statement | Syntax | Description |
 |-----------|--------|-------------|
-| LET | `[LET] var = expr` | Assign a value to a variable (`LET` keyword is optional) |
+| LET | `[LET] var = expr` | Assign a value (`LET` keyword is optional) |
 | PRINT | `PRINT [expr_list]` | Output values to the screen |
-| INPUT | `INPUT ["prompt";] var` | Read user input into a variable |
-| IF/THEN/ELSE | `IF expr THEN stmt\|linenum [ELSE stmt\|linenum]` | Conditional execution with optional ELSE branch |
-| GOTO | `GOTO linenum` | Unconditional jump to a line number |
+| INPUT | `INPUT ["prompt" (;\|,)] var` | Read user input (`;` appends `?`, `,` suppresses it) |
+| IF/THEN/ELSE | `IF expr THEN clause [ELSE clause]` | Conditional (clause is a line number or statement) |
+| GOTO | `GOTO linenum` | Unconditional jump |
 | FOR/NEXT | `FOR var = start TO end [STEP val]` | Counted loop |
+| GOSUB | `GOSUB expr` | Call subroutine (target may be a computed expression) |
+| ON...GOSUB | `ON expr GOSUB n1, n2, ...` | Computed subroutine dispatch |
+| RETURN | `RETURN [expr]` | Return from subroutine (optional target line number) |
+| DEF FN | `DEF FNname[(params)] = expr` | Define a single-line user function |
+| DATA | `DATA item, item, ...` | Inline data values |
+| READ | `READ var [, var ...]` | Read the next DATA value into variables |
+| RESTORE | `RESTORE [linenum]` | Reset the DATA pointer |
+| DIM | `DIM var(n) [, var(m, p)]` | Dimension arrays (subscripts are 0-based) |
+| ERASE | `ERASE var [, var ...]` | Remove arrays so they can be re-dimensioned |
 | REM | `REM text` or `' text` | Comment (ignored by interpreter) |
 | END | `END` | Terminate the program |
 
+Multiple statements can appear on one line separated by colons (e.g., `10 X = 0 : Y = 10`).
+
 ### Expressions
 
-- **Arithmetic**: `+`, `-`, `*`, `/`, `^` (power)
-- **Comparison**: `=`, `<>`, `<`, `>`, `<=`, `>=`
-- **Unary minus**: `-expr`
-- **Parentheses**: `(expr)`
-- **String concatenation**: `"A" + "B"`
+Operator precedence from lowest to highest:
 
-Operator precedence (highest to lowest): parentheses, unary minus, `^`, `*` `/`, `+` `-`, comparisons.
+| Precedence | Operators |
+|------------|-----------|
+| Lowest | `OR` |
+| | `XOR` |
+| | `AND` |
+| | `NOT` (unary) |
+| | `=  <>  <  >  <=  >=` |
+| | `+  -` |
+| | `*  /` |
+| | `^` (exponentiation) |
+| Highest | `-` (unary negation) |
+
+- All binary operators are left-associative.
+- Comparisons return `-1` (true) or `0` (false), MS-BASIC style.
+- `AND`, `OR`, `XOR`, `NOT` operate as bitwise integer operations.
+- `+` performs string concatenation when both operands are strings.
+- String comparison is supported with all comparison operators.
+
+See the [full specification](vibe-basic-syntax.txt) for the complete EBNF grammar.
 
 ### Built-in Functions
 
-| Function | Description |
-|----------|-------------|
-| `INT(x)` | Floor of x |
-| `ABS(x)` | Absolute value |
-| `SQR(x)` | Square root |
-| `RND(x)` | Random number in [0.0, 1.0) |
-| `LEN(s$)` | Length of a string |
+| Category | Functions |
+|----------|-----------|
+| Numeric | `INT` `ABS` `SQR` `RND` `EXP` `LOG` `SGN` `SIN` `COS` `TAN` `ATN` `FIX` `CINT` `CSNG` `CDBL` |
+| String/Substring | `LEN` `LEFT$` `RIGHT$` `MID$` `INSTR` |
+| Conversion | `ASC` `CHR$` `STR$` `VAL` `HEX$` `OCT$` |
+| Formatting | `STRING$` `SPACE$` `SPC` `TAB` |
+| Binary Data | `MKI$` `MKS$` `MKD$` `CVI` `CVS` `CVD` |
+
+See the [full specification](vibe-basic-syntax.txt) for detailed parameter descriptions and behavior.
 
 ### Variables
 
-Variable names start with a letter and may contain letters, digits, and underscores. Names are case-insensitive (stored uppercase). An optional type sigil at the end indicates the type:
+Variable names start with a letter and may contain letters, digits, and underscores. Names are case-insensitive (stored uppercase). An optional type sigil indicates the type:
 
-- `$` — string (e.g., `N$`)
-- `%` — integer (e.g., `X%`)
-- `!` — single-precision float
-- `#` — double-precision float
+- `$` — string, `%` — integer, `!` — single-precision, `#` — double-precision
 
-Keywords are case-insensitive.
+### Arrays
+
+Arrays are declared with `DIM` and support multiple dimensions with 0-based subscripts. Using an array without `DIM` auto-dimensions it with a maximum subscript of 10. See the [full specification](vibe-basic-syntax.txt) for details.
 
 ### PRINT Formatting
 
-- **Semicolon** (`;`) — suppresses the trailing newline, next output continues on the same line
+- **Semicolon** (`;`) — suppresses spacing; next output continues on the same line
 - **Comma** (`,`) — advances to the next 14-character tab zone
 - **No separator at end** — prints a newline after the last item
-
-### Multi-Statement Lines
-
-Multiple statements can appear on one line separated by colons:
-
-```basic
-50 ISPRIME = 0 : GOTO 70
-```
 
 ## Project Structure
 
@@ -144,6 +162,15 @@ Several example programs are included in the `examples/` directory:
 | `fibonacci.bas` | Fibonacci series with input validation |
 | `guessing_game.bas` | Number guessing game using RND and nested ELSE |
 | `primes.bas` | Prime number finder with nested FOR loops |
+| `adventure.bas` | Text adventure game |
+| `pirate.bas` | Pirate Island adventure game |
+| `alice.bas` | Alice in Wonderland game |
+| `gosub.bas` | GOSUB/RETURN demonstration |
+| `arrays.bas` | Array operations with DIM |
+| `data.bas` | DATA/READ/RESTORE demonstration |
+| `math.bas` | Math functions demonstration |
+| `powers.bas` | Powers calculation |
+| `strings.bas` | String function demonstration |
 
 ### Example Program
 
@@ -171,7 +198,7 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (189 tests):
+Run the full test suite (663 tests):
 
 ```sh
 cargo test
@@ -181,12 +208,12 @@ Tests are organized by module:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `token` | 13 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
-| `expr` | 26 | Expression parser: precedence, associativity, parentheses, functions |
-| `eval` | 61 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
-| `ast` | 32 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
-| `interpreter` | 41 | Integration: control flow, loops, I/O, example programs from the spec |
-| `debugger` | 16 | Debugger: stepping, breakpoints, LIST, variable inspection and modification |
+| `token` | 43 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
+| `expr` | 45 | Expression parser: precedence, associativity, parentheses, functions |
+| `eval` | 268 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
+| `ast` | 90 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
+| `interpreter` | 175 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
+| `debugger` | 42 | Debugger: stepping, breakpoints, LIST, variable inspection and modification |
 
 ## Formatting
 
