@@ -2803,4 +2803,447 @@ mod tests {
         .unwrap();
         assert_eq!(output, "DEEP\nBACK2\nBACK1\n");
     }
+
+    // =========================================================================
+    // Tests for nested combinations of IF/THEN/ELSE, GOSUB/RETURN,
+    // ON...GOSUB/RETURN, GOTO, and END on multi-statement lines
+    // =========================================================================
+
+    #[test]
+    fn test_if_then_gosub_on_multistatement_line() {
+        // IF true -> GOSUB executes, RETURN resumes at statement after the IF
+        let output =
+            run_program("10 X = 1 : IF X = 1 THEN GOSUB 100 : PRINT \"AFTER\" : END\n100 PRINT \"SUB\"\n110 RETURN\n")
+                .unwrap();
+        assert_eq!(output, "SUB\nAFTER\n");
+    }
+
+    #[test]
+    fn test_if_false_then_gosub_skips_rest_of_line() {
+        // IF false with no ELSE -> SkipLine, remaining statements on line are skipped
+        let output = run_program(
+            "10 IF 0 THEN GOSUB 100 : PRINT \"SHOULD NOT PRINT\"\n20 PRINT \"NEXT LINE\"\n30 END\n100 PRINT \"SUB\"\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "NEXT LINE\n");
+    }
+
+    #[test]
+    fn test_if_then_goto_on_multistatement_line() {
+        // IF true -> GOTO skips remaining statements on the line
+        let output =
+            run_program("10 IF 1 THEN GOTO 30 : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n30 PRINT \"OK\"\n").unwrap();
+        assert_eq!(output, "OK\n");
+    }
+
+    #[test]
+    fn test_if_false_then_goto_else_goto_on_multistatement_line() {
+        // IF false -> ELSE GOTO, remaining statements skipped
+        let output = run_program(
+            "10 IF 0 THEN GOTO 30 ELSE GOTO 40 : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n30 PRINT \"THEN\" : END\n40 PRINT \"ELSE\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "ELSE\n");
+    }
+
+    #[test]
+    fn test_if_then_end_on_multistatement_line() {
+        // IF true -> END terminates immediately, remaining statements skipped
+        let output = run_program("10 IF 1 THEN END : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n").unwrap();
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_if_else_end_on_multistatement_line() {
+        // IF false -> ELSE END terminates immediately
+        let output =
+            run_program("10 PRINT \"BEFORE\" : IF 0 THEN PRINT \"T\" ELSE END : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n")
+                .unwrap();
+        assert_eq!(output, "BEFORE\n");
+    }
+
+    #[test]
+    fn test_if_else_gosub_on_multistatement_line() {
+        // IF false -> ELSE GOSUB, RETURN resumes at statement after the IF
+        let output = run_program(
+            "10 IF 0 THEN PRINT \"T\" ELSE GOSUB 100 : PRINT \"AFTER\" : END\n100 PRINT \"ELSESUB\"\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "ELSESUB\nAFTER\n");
+    }
+
+    #[test]
+    fn test_gosub_then_if_goto_on_same_line() {
+        // GOSUB returns, then IF...THEN GOTO executes on same line
+        let output = run_program(
+            "10 GOSUB 100 : IF X = 42 THEN GOTO 30 : PRINT \"SKIP\"\n20 PRINT \"SKIP2\" : END\n30 PRINT \"JUMPED\" : END\n100 X = 42\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "JUMPED\n");
+    }
+
+    #[test]
+    fn test_gosub_then_if_else_on_same_line() {
+        // GOSUB sets a variable, then IF...ELSE decides based on it
+        let output = run_program(
+            "10 GOSUB 100 : IF X = 99 THEN PRINT \"YES\" ELSE PRINT \"NO\" : END\n100 X = 99\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "YES\n");
+    }
+
+    #[test]
+    fn test_on_gosub_inside_if_then_on_multistatement_line() {
+        // IF true -> ON...GOSUB, RETURN resumes at statement after the IF
+        let output = run_program(
+            "10 X = 2 : IF X > 0 THEN ON X GOSUB 100, 200 : PRINT \"DONE\" : END\n100 PRINT \"S1\" : RETURN\n200 PRINT \"S2\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "S2\nDONE\n");
+    }
+
+    #[test]
+    fn test_on_gosub_then_goto_on_same_line() {
+        // ON...GOSUB returns, then GOTO on the same line
+        let output = run_program(
+            "10 ON 1 GOSUB 100 : GOTO 30 : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n30 PRINT \"JUMPED\" : END\n100 PRINT \"SUB\"\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\nJUMPED\n");
+    }
+
+    #[test]
+    fn test_on_gosub_then_if_then_end_on_same_line() {
+        // ON...GOSUB returns, then IF...THEN END terminates
+        let output = run_program(
+            "10 ON 1 GOSUB 100 : IF 1 THEN END : PRINT \"SKIP\"\n20 PRINT \"SKIP2\"\n100 PRINT \"SUB\"\n110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\n");
+    }
+
+    #[test]
+    fn test_multiple_gosubs_with_if_on_same_line() {
+        // Multiple GOSUBs interspersed with IF on the same line
+        let output = run_program(
+            "10 GOSUB 100 : IF X = 1 THEN GOSUB 200 : PRINT \"DONE\" : END\n100 X = 1 : RETURN\n200 PRINT \"SECOND\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\nDONE\n");
+    }
+
+    #[test]
+    fn test_goto_from_subroutine_on_multistatement_line() {
+        // GOTO inside a subroutine on a multi-statement line
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"BACK\" : END\n100 PRINT \"A\" : GOTO 110 : PRINT \"SKIP\"\n110 PRINT \"B\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "A\nB\nBACK\n");
+    }
+
+    #[test]
+    fn test_if_then_gosub_nested_in_subroutine() {
+        // Subroutine contains IF...THEN GOSUB on a multi-statement line (nested GOSUB)
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"FINAL\" : END\n100 IF 1 THEN GOSUB 200 : PRINT \"MID\" : RETURN\n200 PRINT \"DEEP\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "DEEP\nMID\nFINAL\n");
+    }
+
+    #[test]
+    fn test_end_inside_if_in_subroutine_on_multistatement_line() {
+        // END inside IF within a subroutine terminates the entire program
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"SHOULD NOT PRINT\"\n100 PRINT \"IN SUB\" : IF 1 THEN END : PRINT \"SKIP\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "IN SUB\n");
+    }
+
+    #[test]
+    fn test_return_with_line_number_from_multistatement_line() {
+        // RETURN with a line number redirects instead of returning to caller
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"SHOULD NOT PRINT\" : END\n20 PRINT \"REDIRECTED\" : END\n100 PRINT \"SUB\" : RETURN 20\n",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\nREDIRECTED\n");
+    }
+
+    #[test]
+    fn test_on_gosub_out_of_range_continues_on_multistatement_line() {
+        // ON...GOSUB with out-of-range selector should continue to next statement
+        let output = run_program(
+            "10 ON 5 GOSUB 100, 200 : PRINT \"CONTINUED\" : END\n100 PRINT \"S1\" : RETURN\n200 PRINT \"S2\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_if_then_goto_else_gosub_on_multistatement_line() {
+        // True: GOTO jumps; False: GOSUB and return to same line
+        // Test the false (ELSE) branch
+        let output = run_program(
+            "10 IF 0 THEN GOTO 30 ELSE GOSUB 100 : PRINT \"AFTER ELSE\" : END\n30 PRINT \"THEN\" : END\n100 PRINT \"ELSESUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "ELSESUB\nAFTER ELSE\n");
+    }
+
+    #[test]
+    fn test_if_then_goto_else_gosub_true_branch() {
+        // True: GOTO jumps, skipping rest of line
+        let output = run_program(
+            "10 IF 1 THEN GOTO 30 ELSE GOSUB 100 : PRINT \"SKIP\" : END\n30 PRINT \"THEN\" : END\n100 PRINT \"ELSESUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "THEN\n");
+    }
+
+    #[test]
+    fn test_chained_gosub_goto_end_on_multistatement_line() {
+        // GOSUB returns, GOTO jumps, END terminates (3 control flow ops on one line)
+        let output = run_program(
+            "10 GOSUB 100 : GOTO 20 : PRINT \"SKIP\"\n20 PRINT \"JUMPED\" : END\n100 PRINT \"SUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "SUB\nJUMPED\n");
+    }
+
+    #[test]
+    fn test_if_false_skips_line_but_not_next_line() {
+        // IF false with no ELSE skips the rest of the current line only
+        let output = run_program("10 PRINT \"A\" : IF 0 THEN PRINT \"B\" : PRINT \"C\"\n20 PRINT \"D\"\n").unwrap();
+        assert_eq!(output, "A\nD\n");
+    }
+
+    #[test]
+    fn test_deeply_nested_gosub_with_if_and_goto() {
+        // 3-level nested GOSUB with IF and GOTO mixed in
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"L0\" : END\n\
+             100 IF 1 THEN GOSUB 200 : PRINT \"L1\" : RETURN\n\
+             200 GOSUB 300 : IF 1 THEN GOTO 210 : PRINT \"SKIP\"\n\
+             210 PRINT \"L2\" : RETURN\n\
+             300 PRINT \"L3\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "L3\nL2\nL1\nL0\n");
+    }
+
+    #[test]
+    fn test_on_gosub_with_if_decision_after_return() {
+        // ON...GOSUB sets a variable, IF after return uses it to branch
+        let output = run_program(
+            "10 V = 2 : ON V GOSUB 100, 200, 300 : IF R = 20 THEN PRINT \"CORRECT\" ELSE PRINT \"WRONG\" : END\n\
+             100 R = 10 : RETURN\n\
+             200 R = 20 : RETURN\n\
+             300 R = 30 : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "CORRECT\n");
+    }
+
+    #[test]
+    fn test_gosub_return_to_end_on_same_line_no_extra_execution() {
+        // After GOSUB returns, END is the very next statement—nothing else should run
+        let output = run_program(
+            "10 PRINT \"START\" : GOSUB 100 : END : PRINT \"SHOULD NOT PRINT\"\n20 PRINT \"ALSO SHOULD NOT PRINT\"\n100 PRINT \"SUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "START\nSUB\n");
+    }
+
+    #[test]
+    fn test_if_then_on_gosub_else_goto_multistatement() {
+        // IF true -> ON...GOSUB; false would GOTO
+        let output = run_program(
+            "10 X = 1 : IF X = 1 THEN ON X GOSUB 100 : PRINT \"DONE\" : END\n30 PRINT \"ELSE\" : END\n100 PRINT \"ON-SUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "ON-SUB\nDONE\n");
+    }
+
+    #[test]
+    fn test_goto_inside_if_inside_subroutine_multistatement() {
+        // Subroutine has IF...THEN GOTO on multi-statement line
+        let output = run_program(
+            "10 X = 5 : GOSUB 100 : PRINT \"BACK\" : END\n\
+             100 IF X > 3 THEN GOTO 110 : PRINT \"SKIP\"\n\
+             110 PRINT \"JUMPED IN SUB\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "JUMPED IN SUB\nBACK\n");
+    }
+
+    #[test]
+    fn test_randomized_on_gosub_with_end_on_multistatement_line() {
+        // Use a randomized selector to test ON...GOSUB dispatch, each subroutine
+        // prints its index, returns, and END follows on the same line
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for selector in 1..=3 {
+            let program = format!(
+                "10 ON {} GOSUB 100, 200, 300 : END\n\
+                 100 PRINT \"1\" : RETURN\n\
+                 200 PRINT \"2\" : RETURN\n\
+                 300 PRINT \"3\" : RETURN\n",
+                selector
+            );
+            let output = run_program(&program).unwrap();
+            let expected = format!("{}\n", selector);
+            assert_eq!(output, expected, "ON {} GOSUB dispatched incorrectly", selector);
+            seen.insert(selector);
+        }
+        assert_eq!(seen.len(), 3);
+    }
+
+    #[test]
+    fn test_randomized_if_gosub_branching_on_multistatement_line() {
+        // Randomized: test multiple threshold values with IF...THEN GOSUB vs ELSE GOSUB
+        for x in 0..=10 {
+            let program = format!(
+                "10 X = {} : IF X > 5 THEN GOSUB 100 ELSE GOSUB 200 : END\n\
+                 100 PRINT \"HIGH\" : RETURN\n\
+                 200 PRINT \"LOW\" : RETURN\n",
+                x
+            );
+            let output = run_program(&program).unwrap();
+            if x > 5 {
+                assert_eq!(output, "HIGH\n", "X={} should be HIGH", x);
+            } else {
+                assert_eq!(output, "LOW\n", "X={} should be LOW", x);
+            }
+        }
+    }
+
+    #[test]
+    fn test_for_next_with_gosub_on_same_multistatement_line() {
+        // FOR loop body contains GOSUB on the same line
+        let output = run_program(
+            "10 FOR I = 1 TO 3 : GOSUB 100 : NEXT I : PRINT \"DONE\" : END\n\
+             100 PRINT I; : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3 DONE\n");
+    }
+
+    #[test]
+    fn test_for_next_with_if_goto_early_exit() {
+        // FOR loop with IF...THEN GOTO (early exit) — NEXT must be on its own line
+        // because IF false (no ELSE) causes SkipLine, skipping remaining statements
+        let output = run_program(
+            "10 FOR I = 1 TO 10\n\
+             20 IF I = 4 THEN GOTO 50\n\
+             30 PRINT I;\n\
+             40 NEXT I\n\
+             50 PRINT \"EXITED AT\"; I\n",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3 EXITED AT 4 \n");
+    }
+
+    #[test]
+    fn test_for_next_with_conditional_gosub_separate_lines() {
+        // FOR loop with conditional GOSUB — IF without ELSE causes SkipLine
+        // which skips remaining statements, so NEXT must be on a separate line
+        let output = run_program(
+            "10 FOR I = 1 TO 4\n\
+             20 IF I > 2 THEN GOSUB 100\n\
+             30 NEXT I\n\
+             40 PRINT \"DONE\" : END\n\
+             100 PRINT \"CALLED\"; I : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "CALLED 3 \nCALLED 4 \nDONE\n");
+    }
+
+    #[test]
+    fn test_for_next_with_conditional_gosub_using_else_on_same_line() {
+        // IF with ELSE avoids SkipLine, so NEXT can be on the same line
+        let output = run_program(
+            "10 FOR I = 1 TO 4 : IF I > 2 THEN GOSUB 100 ELSE PRINT \"\"; : NEXT I : PRINT \"DONE\" : END\n\
+             100 PRINT \"CALLED\"; I; : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "CALLED 3 CALLED 4 DONE\n");
+    }
+
+    #[test]
+    fn test_gosub_with_return_line_number_on_multistatement_line() {
+        // RETURN with explicit line number on a multi-statement line
+        let output = run_program(
+            "10 PRINT \"A\" : GOSUB 100 : PRINT \"SHOULD NOT PRINT\" : END\n\
+             20 PRINT \"REDIRECTED\" : END\n\
+             100 PRINT \"SUB\" : RETURN 20 : PRINT \"SKIP\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "A\nSUB\nREDIRECTED\n");
+    }
+
+    #[test]
+    fn test_nested_on_gosub_on_multistatement_lines() {
+        // ON...GOSUB from within a subroutine that was itself called by ON...GOSUB
+        let output = run_program(
+            "10 ON 1 GOSUB 100 : PRINT \"OUTER DONE\" : END\n\
+             100 PRINT \"L1\" : ON 2 GOSUB 200, 300 : PRINT \"L1 DONE\" : RETURN\n\
+             200 PRINT \"L2A\" : RETURN\n\
+             300 PRINT \"L2B\" : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "L1\nL2B\nL1 DONE\nOUTER DONE\n");
+    }
+
+    #[test]
+    fn test_if_then_line_number_on_multistatement_line() {
+        // IF...THEN <line_number> is an implicit GOTO on a multi-statement line
+        let output = run_program(
+            "10 PRINT \"BEFORE\" : IF 1 THEN 30 : PRINT \"SKIP\"\n\
+             20 PRINT \"SKIP2\"\n\
+             30 PRINT \"TARGET\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "BEFORE\nTARGET\n");
+    }
+
+    #[test]
+    fn test_if_else_line_number_on_multistatement_line() {
+        // IF false -> ELSE <line_number> (implicit GOTO) on multi-statement line
+        let output = run_program(
+            "10 PRINT \"BEFORE\" : IF 0 THEN 30 ELSE 40 : PRINT \"SKIP\"\n\
+             30 PRINT \"THEN\" : END\n\
+             40 PRINT \"ELSE\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "BEFORE\nELSE\n");
+    }
+
+    #[test]
+    fn test_gosub_from_for_loop_with_end_in_subroutine() {
+        // GOSUB from a FOR loop; subroutine conditionally ENDs
+        let output = run_program(
+            "10 FOR I = 1 TO 5\n\
+             20 GOSUB 100 : NEXT I\n\
+             30 PRINT \"DONE\" : END\n\
+             100 PRINT I; : IF I = 3 THEN END\n\
+             110 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  2  3 ");
+    }
+
+    #[test]
+    fn test_multiple_control_flow_ops_one_line() {
+        // LET, GOSUB, IF, GOTO, END all on one multi-statement line
+        let output = run_program(
+            "10 X = 0 : GOSUB 100 : IF X = 1 THEN GOTO 20 : PRINT \"SKIP\"\n\
+             20 PRINT \"REACHED\" : END\n\
+             100 X = 1 : RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "REACHED\n");
+    }
 }

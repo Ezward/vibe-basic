@@ -53,8 +53,9 @@ We are going to create a basic interpreter written in Rust for a subset of MS-BA
 - The RETURN statement in a subroutine causes GW-BASIC to return to the statement following the most recent GOSUB clause (which may be on the same line as part of a multi-statment line).  For this reason, when executing a GOSUB statement, the intepreter should remember (on a stack) the statement after the GOSUB clause so that the RETURN statement can pop that value.  If the optional argument is provided, then the RETURN statement will still pop the subroutine stack, but instead of using the popped value to return it will use the provided BASIC line number argument.  See https://hwiegman.home.xs4all.nl/gw-man/RETURN.html.
 Write an example program that tests GOSUB...RETURN and ON...GOSUB...RETURNand save as ./examples/gosub.bas.  Make sure this parses and runs correctly.
 
+11. Make sure that mixing IF...THEN...ELSE, FOR...NEXT, GOSUB...RETURN, ON...GOSUB...RETURN, GOTO and END nested in combinations in a multiline statement will work correctly.  Specifically the interpreter should track both the BASIC line number and the statement index to which it should jump, loop or return.
 
-11. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
+12. Please create a text adventure game based on the key elements and plot points in the book 'Alice in Wonderland' whose text can be found at https://www.gutenberg.org/files/11/11-0.txt and save the text adventure as ./examples/alice.bas. Add interesting puzzles to the game.  Make sure the BASIC code parses correctly. Make sure the adventure can be solved. Make sure all necesary puzzles are solved before the player can win.
 
 Generally:
 
