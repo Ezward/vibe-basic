@@ -1,0 +1,235 @@
+================================================================================
+PIRATE ISLAND - COMPLETE WALKTHROUGH
+================================================================================
+
+Final Score: 210/200 points — Rating: Sea Captain
+
+OVERVIEW
+--------
+You wake aboard the pirate ship "The Eagle's Nest." Your goal is to find the
+legendary Spanish gold coin hidden on Pirate Island and return it to the ship.
+
+The game has three phases:
+  1. Prepare on the ship (gather items, research coordinates, meet captain)
+  2. Explore Pirate Island (collect key, pick, shovel; navigate caves)
+  3. Retrieve the coin and return to the ship
+
+STEP-BY-STEP SOLUTION
+---------------------
+
+=== PHASE 1: SHIP PREPARATION ===
+
+Your Cabin (Room 26):
+  OPEN DRAWER       — Reveals your pirate book and sword
+  GET BOOK           — Pick up the book (has coordinate clues)
+  GET SWORD          — Pick up the sword
+  OPEN DOOR          — Opens passage east to hallway
+
+Navigate to the crow's nest to get the shovel:
+  E                  — Hallway (Room 27)
+  S                  — Hallway (Room 31)
+  U                  — Mid Deck (Room 33)
+  CLIMB MAST         — Crow's Nest (Room 35) — shovel is here
+  GET SHOVEL         — (+15 points)
+
+Navigate to the captain's quarters:
+  D                  — Back to Mid Deck (Room 33)
+  N                  — Port Deck (Room 29) — captain's door is here
+  KNOCK              — "What do you want to knock on?"
+  DOOR               — Captain ushers you in (Room 25)
+
+The captain asks for the coordinates of Pirate Island:
+  29                 — Longitude (the book says 24, but Julius was off by 5°)
+  45                 — Latitude (as written in the book)
+
+  NOTE: The book says longitude 24, latitude 45. But research in the
+  ship's library reveals Julius had a vision problem causing him to mark
+  positions 5 degrees west of the true location. So: 24 + 5 = 29.
+
+=== PHASE 2: WAIT FOR CAPTAIN (10 MOVES) ===
+
+After giving correct coordinates, the captain needs 10 turns to sail to the
+island. Navigate around the ship to kill time:
+
+  S                  — Port Deck (Room 33)
+  S                  — Starboard Deck (Room 39)
+  D                  — Hallway (Room 37)
+  W                  — Mess Hall (Room 36)
+  S                  — Galley (Room 40) — note the cook and garlic here
+  N                  — Mess Hall (Room 36)
+  E                  — Hallway (Room 37)
+  U                  — Starboard Deck (Room 39)
+  N                  — Mid Deck (Room 33)
+
+On the 10th move, the captain arrives and congratulates you for finding
+Pirate Island. He gives you a bag of silver and opens the starboard deck
+path to the island.
+
+=== PHASE 3: BUY GARLIC ===
+
+Navigate to the galley to buy garlic (needed to survive the bat cave):
+  S                  — Starboard Deck (Room 39)
+  D                  — Hallway (Room 37)
+  W                  — Mess Hall (Room 36)
+  S                  — Galley (Room 40)
+  BUY GARLIC         — "With what?" prompt:
+  BAG                — Trade the bag of silver for garlic
+
+=== PHASE 4: GO ASHORE ===
+
+  N                  — Mess Hall (Room 36)
+  E                  — Hallway (Room 37)
+  U                  — Starboard Deck (Room 39)
+  S                  — Shallow Cove (Room 22) — (+20 points, now on the island)
+
+=== PHASE 5: GET THE KEY ===
+
+Navigate through the island to the tree where the key is hidden:
+  N                  — Sandy Beach (Room 17)
+  W                  — Beach Path (Room 16)
+  N                  — Meadow (Room 12)
+  W                  — Inland Cove Shore (Room 11)
+  N                  — Base of Cliff (Room 6)
+  D                  — Rain Forest (Room 3)
+  E                  — Small Path (Room 4) — large tree here
+  U                  — Up A Tree (Room 8) — key is here
+  GET KEY            — Pick up the shiny key
+
+=== PHASE 6: GET THE BOX AND PICK ===
+
+Navigate to the inland cove and swim to the underwater area:
+  D                  — Small Path (Room 4)
+  W                  — Rain Forest (Room 3)
+  U                  — Base of Cliff (Room 6)
+  W                  — Inland Cove Shore (Room 11)
+  SWIM               — Top of the Bay (Room 44)
+  D                  — Bottom of the Bay (Room 45) — box is here
+  GET BOX            — Pick up the small box
+  OPEN BOX           — Reveals a thieve's pick inside
+  DROP BOX           — Free up inventory space
+  GET PICK           — Pick up the thieve's pick (+40 points)
+
+=== PHASE 7: NAVIGATE TO THE BAT CAVE ===
+
+Return to shore and take the long path through the swamps:
+  U                  — Top of the Bay (Room 44)
+  E                  — Inland Cove Shore (Room 11)
+  E                  — Meadow (Room 12)
+  S                  — Beach Path (Room 16)
+  E                  — Sandy Beach (Room 17)
+  E                  — Swamp (Room 18)
+  N                  — Thick Forest (Room 13)
+  N                  — Thick Forest (Room 9)
+  N                  — Thick Forest (Room 5)
+  E                  — Thick Forest (Room 10)
+  S                  — Swamp (Room 19)
+  N                  — Swamp (Room 14)
+  W                  — Dark Cave (Room 20)
+  E                  — Bat Cave (Room 21) — garlic keeps bats at bay!
+
+=== PHASE 8: DIG UP THE GRATE AND FIND THE TREASURE ===
+
+  DIG                — "With what?" prompt:
+  SHOVEL             — Dig in damp soil, discover a metal grate!
+  UNLOCK GRATE       — "With what?" prompt:
+  PIC                — Use the thieve's pick — grate opens, passage down revealed
+  D                  — Secret Cave (Room 23) — (+20 points) — pirate chest is here!
+  UNLOCK CHEST       — "With what?" prompt:
+  KEY                — Use the key — chest opens, revealing the Spanish gold coin!
+  GET COIN           — Pick up the gold coin (+60 points)
+
+=== PHASE 9: RETURN TO THE SHIP WITH THE COIN ===
+
+Navigate back through the caves and swamps to the shore:
+  U                  — Bat Cave (Room 21)
+  W                  — Dark Cave (Room 20)
+  W                  — Swamp (Room 14)
+  S                  — Swamp (Room 19)
+  S                  — Swamp (Room 18)
+  W                  — Sandy Beach (Room 17)
+  S                  — Shallow Cove (Room 22)
+  S                  — Starboard Deck (Room 39) — VICTORY!
+
+The captain greets you: "Welcome back, matey! Congradulations, you found
+the coin. Now we will all be rich!" (+55 points)
+
+SCORING BREAKDOWN
+-----------------
+  Get shovel .............. +15
+  Reach shallow cove ...... +20
+  Reach secret cave ....... +20
+  Get thieve's pick ....... +40
+  Get gold coin ........... +60
+  Return with coin ........ +55
+  ─────────────────────────────
+  TOTAL                     210/200 — Sea Captain
+
+WARNINGS / DEATH TRAPS
+-----------------------
+  - Room 15 (Quicksand): Reached from Room 16 W or Room 11 S — instant death
+  - Room 43 (Underwater): Going E/W/U/D from Room 22 — instant death
+  - Room 1 (High Cliff): Digging here triggers a booby-trapped coffin — death
+  - Room 21 (Bat Cave): Entering without garlic — bats kill you
+  - Room 40 (Galley): Trying to GET GARLIC without buying — cook kills you
+  - Captain: Giving wrong coordinates — captain decapitates you after 10 moves
+  - Room 39 (return): Coming back without the coin — captain kills you
+
+ITEM LOCATIONS
+--------------
+  Shovel ......... Crow's Nest (Room 35)
+  Key ............ Up A Tree (Room 8)
+  Garlic ......... Galley (Room 40) — must BUY with bag of silver
+  Book ........... Your Cabin dresser drawer (Room 26) — OPEN DRAWER
+  Sword .......... Your Cabin dresser drawer (Room 26) — OPEN DRAWER
+  Silver bag ..... Given by captain after 10 moves (correct coordinates)
+  Box ............ Bottom of the Bay (Room 45)
+  Thieve's pick .. Inside the box — OPEN BOX
+  Gold coin ...... Inside chest in Secret Cave (Room 23) — UNLOCK with key
+
+SHIP MAP (Rooms 24-42)
+-----------------------
+                     [24 Wheelhouse]
+                      |           |
+  [30 Crew]--[27 Hall]--[29 Port]--[28 Port]
+              |          |          |
+  [36 Mess]--[31 Hall]--[33 Mid ]--[32 Mid ]
+   |          |          |          |
+  [40 Galley][37 Hall]--[39 Star]--[38 Star]
+              |                     |
+             [41 Hall]             [42 Library]
+
+  [26 Cabin]--[27] (after OPEN DOOR)
+  [25 Captain] (via KNOCK at Room 29)
+  [34] Crow's nest above Room 32
+  [35] Crow's nest above Room 33
+
+ISLAND MAP (Rooms 1-23, 44-45)
+-------------------------------
+                [1 Cliff]
+                 |
+  [2 Forest]---[3 Forest]---[4 Path]---[8 Tree]
+                 |
+                [6 Near Cliff]
+               / |           \
+     [11 Cove]  [12 Meadow]  [1 up]
+      |    \     |
+  [44 Bay]  \  [16 Beach]---[15 QUICKSAND!]
+   |         \   |
+  [45 Bottom] [17 Beach]---[7 Rock]
+               |         \
+             [22 Shallows] [18 Swamp]
+                            |
+                          [13 Forest]
+                            |
+         [5 Forest]---[9 Forest]
+          |
+        [10 Forest]
+          |
+   [14 Swamp]---[19 Swamp]---[18]
+    |
+  [20 Dark Cave]
+    |
+  [21 Bat Cave] (need garlic!)
+    |
+  [23 Secret Cave] (through grate, need pick to unlock)
+================================================================================
