@@ -2750,4 +2750,57 @@ mod tests {
         .unwrap();
         assert_eq!(output, " 4 \n");
     }
+
+    #[test]
+    fn test_gosub_return_same_line_continues_after_gosub() {
+        // RETURN should resume at the PRINT "AFTER" statement on the same line as GOSUB
+        let output =
+            run_program("10 GOSUB 100 : PRINT \"AFTER\" : END\n20 PRINT \"BAD\"\n100 PRINT \"SUB\"\n110 RETURN\n")
+                .unwrap();
+        assert_eq!(output, "SUB\nAFTER\n");
+    }
+
+    #[test]
+    fn test_gosub_return_same_line_end_after_gosub() {
+        // END on the same line after GOSUB should terminate after the subroutine returns
+        let output = run_program("10 GOSUB 100 : END\n20 PRINT \"BAD\"\n100 PRINT \"SUB\"\n110 RETURN\n").unwrap();
+        assert_eq!(output, "SUB\n");
+    }
+
+    #[test]
+    fn test_multiple_gosubs_on_same_line() {
+        // Multiple GOSUBs on the same line should each return to the correct position
+        let output = run_program(
+            "10 GOSUB 100 : GOSUB 200 : PRINT \"DONE\" : END\n20 PRINT \"BAD\"\n100 PRINT \"A\"\n110 RETURN\n200 PRINT \"B\"\n210 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "A\nB\nDONE\n");
+    }
+
+    #[test]
+    fn test_on_gosub_return_same_line_continues_after_gosub() {
+        // ON...GOSUB should return to the statement after the ON GOSUB on the same line
+        let output = run_program(
+            "10 ON 2 GOSUB 100, 200, 300 : PRINT \"AFTER\" : END\n20 PRINT \"BAD\"\n100 PRINT \"S1\"\n110 RETURN\n200 PRINT \"S2\"\n210 RETURN\n300 PRINT \"S3\"\n310 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "S2\nAFTER\n");
+    }
+
+    #[test]
+    fn test_on_gosub_return_same_line_with_end() {
+        // END after ON...GOSUB on the same line should terminate after subroutine returns
+        let output = run_program("10 ON 1 GOSUB 100 : END\n20 PRINT \"BAD\"\n100 PRINT \"SUB\"\n110 RETURN\n").unwrap();
+        assert_eq!(output, "SUB\n");
+    }
+
+    #[test]
+    fn test_gosub_return_nested_same_line() {
+        // Nested GOSUB calls from multi-statement lines should maintain correct return addresses
+        let output = run_program(
+            "10 GOSUB 100 : PRINT \"BACK1\" : END\n100 GOSUB 200 : PRINT \"BACK2\"\n110 RETURN\n200 PRINT \"DEEP\"\n210 RETURN\n",
+        )
+        .unwrap();
+        assert_eq!(output, "DEEP\nBACK2\nBACK1\n");
+    }
 }
