@@ -18,6 +18,8 @@ struct ForState {
     step_val: f64,
     /// Index into program lines where the FOR statement is
     line_index: usize,
+    /// Index of the FOR statement within its line (for multi-statement lines)
+    stmt_index: usize,
 }
 
 /// An entry in the collected DATA pool, recording its originating line number.
@@ -83,7 +85,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
             while stmt_idx < line.statements.len() {
                 let stmt = &line.statements[stmt_idx];
-                let result = self.execute_statement(stmt, line_idx, program).map_err(|e| {
+                let result = self.execute_statement(stmt, line_idx, stmt_idx, program).map_err(|e| {
                     let source_text = program
                         .source_lines
                         .get(line.source_line - 1)
@@ -155,8 +157,14 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                         // IF condition was false - skip remaining statements on this line
                         break;
                     }
-                    StmtResult::ForLoopSkip(target_idx) => {
-                        next_line_idx = target_idx;
+                    StmtResult::ForLoopSkip { line_index, stmt_index } => {
+                        next_line_idx = line_index;
+                        start_stmt_idx = stmt_index;
+                        break;
+                    }
+                    StmtResult::ForLoopBack { line_index, stmt_index } => {
+                        next_line_idx = line_index;
+                        start_stmt_idx = stmt_index;
                         break;
                     }
                 }
@@ -183,6 +191,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         &mut self,
         stmt: &Statement,
         current_line_idx: usize,
+        current_stmt_idx: usize,
         program: &Program,
     ) -> Result<StmtResult, String> {
         match stmt {
@@ -214,14 +223,14 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     match then.as_ref() {
                         ThenClause::LineNumber(n) => Ok(StmtResult::Goto(*n)),
                         ThenClause::Statement(inner_stmt) => {
-                            self.execute_statement(inner_stmt, current_line_idx, program)
+                            self.execute_statement(inner_stmt, current_line_idx, current_stmt_idx, program)
                         }
                     }
                 } else if let Some(else_cl) = else_clause {
                     match else_cl.as_ref() {
                         ThenClause::LineNumber(n) => Ok(StmtResult::Goto(*n)),
                         ThenClause::Statement(inner_stmt) => {
-                            self.execute_statement(inner_stmt, current_line_idx, program)
+                            self.execute_statement(inner_stmt, current_line_idx, current_stmt_idx, program)
                         }
                     }
                 } else {
@@ -257,9 +266,22 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
                 // Check if the loop should be skipped entirely
                 if (step_val > 0.0 && start_val > end_val) || (step_val < 0.0 && start_val < end_val) {
-                    // Skip to after the matching NEXT
-                    let next_idx = self.find_matching_next(program, current_line_idx, variable)?;
-                    return Ok(StmtResult::ForLoopSkip(next_idx + 1));
+                    // Skip to the statement after the matching NEXT
+                    let (next_line_idx, next_stmt_idx) =
+                        self.find_matching_next(program, current_line_idx, current_stmt_idx, variable)?;
+                    // Continue after the NEXT: if there are more statements on the same line,
+                    // resume at the next statement; otherwise go to the next line.
+                    if next_stmt_idx + 1 < program.lines[next_line_idx].statements.len() {
+                        return Ok(StmtResult::ForLoopSkip {
+                            line_index: next_line_idx,
+                            stmt_index: next_stmt_idx + 1,
+                        });
+                    } else {
+                        return Ok(StmtResult::ForLoopSkip {
+                            line_index: next_line_idx + 1,
+                            stmt_index: 0,
+                        });
+                    }
                 }
 
                 self.for_stack.push(ForState {
@@ -267,6 +289,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     end_val,
                     step_val,
                     line_index: current_line_idx,
+                    stmt_index: current_stmt_idx,
                 });
 
                 Ok(StmtResult::Continue)
@@ -305,8 +328,11 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 };
 
                 if loop_continues {
-                    // Jump back to the line after the FOR statement
-                    Ok(StmtResult::Goto(program.lines[for_state.line_index + 1].line_number))
+                    // Jump back to the statement after the FOR statement
+                    Ok(StmtResult::ForLoopBack {
+                        line_index: for_state.line_index,
+                        stmt_index: for_state.stmt_index + 1,
+                    })
                 } else {
                     // Remove the FOR state from the stack
                     if let Some(var_name) = variable {
@@ -550,21 +576,52 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     }
 
     /// Searches forward from a FOR statement to find its matching NEXT, respecting
-    /// nesting depth of intervening FOR/NEXT pairs.
-    fn find_matching_next(&self, program: &Program, for_line_idx: usize, var: &str) -> Result<usize, String> {
+    /// nesting depth of intervening FOR/NEXT pairs. Searches remaining statements
+    /// on the current line first, then subsequent lines.
+    /// Returns (line_index, stmt_index) of the matching NEXT.
+    fn find_matching_next(
+        &self,
+        program: &Program,
+        for_line_idx: usize,
+        for_stmt_idx: usize,
+        var: &str,
+    ) -> Result<(usize, usize), String> {
         let mut depth = 0;
+        // Search remaining statements on the same line (after the FOR)
+        let line = &program.lines[for_line_idx];
+        for (offset, stmt) in line.statements[(for_stmt_idx + 1)..].iter().enumerate() {
+            let s_idx = for_stmt_idx + 1 + offset;
+            match stmt {
+                Statement::For { .. } => depth += 1,
+                Statement::Next { variable } => {
+                    if depth == 0 {
+                        if let Some(v) = variable {
+                            if v == var {
+                                return Ok((for_line_idx, s_idx));
+                            }
+                        } else {
+                            return Ok((for_line_idx, s_idx));
+                        }
+                    } else {
+                        depth -= 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Search subsequent lines
         for i in (for_line_idx + 1)..program.lines.len() {
-            for stmt in &program.lines[i].statements {
+            for (s_idx, stmt) in program.lines[i].statements.iter().enumerate() {
                 match stmt {
                     Statement::For { .. } => depth += 1,
                     Statement::Next { variable } => {
                         if depth == 0 {
                             if let Some(v) = variable {
                                 if v == var {
-                                    return Ok(i);
+                                    return Ok((i, s_idx));
                                 }
                             } else {
-                                return Ok(i);
+                                return Ok((i, s_idx));
                             }
                         } else {
                             depth -= 1;
@@ -586,7 +643,16 @@ pub(crate) enum StmtResult {
     Return(Option<u32>),
     End,
     SkipLine,
-    ForLoopSkip(usize),
+    /// Skip past a FOR loop body entirely (initial value already exceeds limit).
+    ForLoopSkip {
+        line_index: usize,
+        stmt_index: usize,
+    },
+    /// NEXT loops back to the statement after the FOR on the same (or different) line.
+    ForLoopBack {
+        line_index: usize,
+        stmt_index: usize,
+    },
 }
 
 /// Convenience function: parse and run a BASIC program from a string
@@ -2637,5 +2703,51 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "ONLY\n");
+    }
+
+    #[test]
+    fn test_end_after_for_next_on_same_line() {
+        let output = run_program("10 FOR I = 1 TO 3 : PRINT \"X\"; : NEXT I : END\n20 PRINT \"BAD\"\n").unwrap();
+        assert_eq!(output, "XXX");
+    }
+
+    #[test]
+    fn test_end_after_for_next_on_same_line_with_print() {
+        let output =
+            run_program("10 FOR I = 1 TO 3 : PRINT I; : NEXT I : END\n20 PRINT \"SHOULD NOT PRINT\"\n").unwrap();
+        assert_eq!(output, " 1  2  3 ");
+    }
+
+    #[test]
+    fn test_for_next_same_line_loop_body_executes_correctly() {
+        let output = run_program("10 FOR I = 1 TO 3 : PRINT I : NEXT I\n").unwrap();
+        assert_eq!(output, " 1 \n 2 \n 3 \n");
+    }
+
+    #[test]
+    fn test_end_in_multistatement_line_stops_execution() {
+        let output = run_program("10 PRINT \"A\" : END : PRINT \"B\"\n20 PRINT \"C\"\n").unwrap();
+        assert_eq!(output, "A\n");
+    }
+
+    #[test]
+    fn test_for_next_same_line_with_end_empty_print() {
+        let output = run_program("10 FOR I = 1 TO 3 : PRINT : NEXT I : END\n20 PRINT \"BAD\"\n").unwrap();
+        assert_eq!(output, "\n\n\n");
+    }
+
+    #[test]
+    fn test_for_next_same_line_skip_when_empty_range() {
+        let output = run_program("10 FOR I = 5 TO 1 : PRINT \"SKIP\" : NEXT I : PRINT \"AFTER\"\n").unwrap();
+        assert_eq!(output, "AFTER\n");
+    }
+
+    #[test]
+    fn test_nested_for_next_same_line_with_end() {
+        let output = run_program(
+            "10 S = 0\n20 FOR I = 1 TO 2 : FOR J = 1 TO 2 : S = S + 1 : NEXT J : NEXT I : PRINT S : END\n30 PRINT \"BAD\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, " 4 \n");
     }
 }

@@ -145,7 +145,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                     let _ = writeln!(self.interpreter.output, "Conditional breakpoint set");
                 }
                 DebugCommand::Let(stmt) => {
-                    if let Err(e) = self.interpreter.execute_statement(&stmt, self.line_idx, program) {
+                    if let Err(e) = self.interpreter.execute_statement(&stmt, self.line_idx, 0, program) {
                         let _ = writeln!(self.interpreter.output, "Error: {}", e);
                     }
                 }
@@ -247,7 +247,9 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
 
         while stmt_idx < line.statements.len() {
             let stmt = &line.statements[stmt_idx];
-            let result = self.interpreter.execute_statement(stmt, self.line_idx, program);
+            let result = self
+                .interpreter
+                .execute_statement(stmt, self.line_idx, stmt_idx, program);
             match result {
                 Ok(StmtResult::Continue) => {
                     stmt_idx += 1;
@@ -301,8 +303,14 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                 Ok(StmtResult::SkipLine) => {
                     break;
                 }
-                Ok(StmtResult::ForLoopSkip(target_idx)) => {
-                    next_line_idx = target_idx;
+                Ok(StmtResult::ForLoopSkip { line_index, stmt_index }) => {
+                    next_line_idx = line_index;
+                    self.start_stmt_idx = stmt_index;
+                    break;
+                }
+                Ok(StmtResult::ForLoopBack { line_index, stmt_index }) => {
+                    next_line_idx = line_index;
+                    self.start_stmt_idx = stmt_index;
                     break;
                 }
                 Err(e) => return ExecutionOutcome::Error(e),
