@@ -43,7 +43,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         } else if filename.is_none() {
             filename = Some(arg.clone());
         } else {
-            return Err("Usage: vibe_basic [--version] [--debug] <filename.bas>".to_string());
+            return Err("Usage: vibe-basic [--version] [--debug] <filename.bas>".to_string());
         }
     }
 
@@ -52,7 +52,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             filename: f,
             debug: debug_mode,
         }),
-        None => Err("Usage: vibe_basic [--version] [--debug] <filename.bas>".to_string()),
+        None => Err("Usage: vibe-basic [--version] [--debug] <filename.bas>".to_string()),
     }
 }
 
