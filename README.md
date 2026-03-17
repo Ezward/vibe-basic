@@ -99,7 +99,7 @@ src/
 └── debugger.rs      — Debugger: interactive step-through debugging REPL
 scripts/
 ├── setup-cross-compile.sh — Install cross-compilation toolchains and configure Cargo
-└── build-all.sh            — Build release binaries for all targets (Mac, Linux, Windows)
+└── build.sh                — Build release binaries for native and/or cross-compile targets
 ```
 
 ## Building
@@ -114,6 +114,12 @@ For a release build:
 
 ```sh
 cargo build --release
+```
+
+Or use the build script, which builds a release binary for the native platform:
+
+```sh
+scripts/build.sh
 ```
 
 ## Running
@@ -235,10 +241,16 @@ Two scripts in the `scripts/` directory automate cross-compilation setup and bui
 
 ### One-step build for all targets
 
-Run `build-all.sh` to install all required toolchains (if not already present) and then build release binaries for the native Mac target, Linux (GNU and musl), and Windows:
+Run `build.sh` to build a release binary for the native target:
 
 ```sh
-scripts/build-all.sh
+scripts/build.sh
+```
+
+To also build all cross-compilation targets (installs required toolchains if not already present):
+
+```sh
+scripts/build.sh --all
 ```
 
 Binaries are placed in `target/<target>/release/`.

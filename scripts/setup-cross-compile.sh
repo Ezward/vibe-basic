@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Setup script for cross-compiling this Rust project.
-# Supports macOS (Homebrew) and Linux (apt, dnf/yum, pacman).
+# Supports macOS (Homebrew), Linux (apt, dnf/yum, pacman), and Windows (MSYS2/Git Bash).
 # This script is idempotent — safe to run multiple times.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,6 +11,11 @@ cd "$PROJECT_DIR"
 
 CARGO_CONFIG=".cargo/config.toml"
 OS="$(uname -s)"
+
+# Normalize Windows variants (MINGW64_NT-*, MSYS_NT-*, CYGWIN_NT-*) to "Windows"
+case "$OS" in
+    MINGW*|MSYS*|CYGWIN*) OS="Windows" ;;
+esac
 
 echo "=== Cross-compilation setup (${OS}) ==="
 
@@ -32,8 +37,14 @@ echo "--- Rustup targets ---"
 if [ "$OS" = "Darwin" ]; then
     add_rustup_target x86_64-unknown-linux-gnu
     add_rustup_target x86_64-unknown-linux-musl
+    add_rustup_target x86_64-pc-windows-gnu
+elif [ "$OS" = "Linux" ]; then
+    add_rustup_target x86_64-pc-windows-gnu
+elif [ "$OS" = "Windows" ]; then
+    # Ensure the native MSVC target is available (usually installed by default)
+    add_rustup_target x86_64-pc-windows-msvc
+    echo "[info] No cross-compilation packages needed on Windows"
 fi
-add_rustup_target x86_64-pc-windows-gnu
 
 # --- Package installation ---
 
@@ -143,6 +154,10 @@ elif [ "$OS" = "Linux" ]; then
         arch)   install_linux_package mingw-w64-gcc ;;
     esac
 
+elif [ "$OS" = "Windows" ]; then
+    echo "--- Windows packages ---"
+    echo "[skip] No additional packages needed for native Windows builds"
+
 else
     echo "Unsupported OS: ${OS}"
     exit 1
@@ -196,12 +211,21 @@ if [ "$OS" = "Linux" ]; then
         'linker = "x86_64-w64-mingw32-gcc"'
 fi
 
+# Windows native builds need no special Cargo linker configuration
+
 echo ""
 echo "=== Setup complete ==="
 echo ""
-echo "You can now cross-compile with:"
+echo "You can now build with:"
+echo "  cargo build --release"
 if [ "$OS" = "Darwin" ]; then
+    echo ""
+    echo "Cross-compile targets:"
     echo "  cargo build --release --target x86_64-unknown-linux-gnu"
     echo "  cargo build --release --target x86_64-unknown-linux-musl"
+    echo "  cargo build --release --target x86_64-pc-windows-gnu"
+elif [ "$OS" = "Linux" ]; then
+    echo ""
+    echo "Cross-compile targets:"
+    echo "  cargo build --release --target x86_64-pc-windows-gnu"
 fi
-echo "  cargo build --release --target x86_64-pc-windows-gnu"
