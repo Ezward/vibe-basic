@@ -97,6 +97,9 @@ src/
 ├── ast.rs           — Statement/program parser: parses tokens into an AST
 ├── interpreter.rs   — Interpreter: executes BASIC programs with full control flow
 └── debugger.rs      — Debugger: interactive step-through debugging REPL
+scripts/
+├── setup-cross-compile.sh — Install cross-compilation toolchains and configure Cargo
+└── build-all.sh            — Build release binaries for all targets (Mac, Linux, Windows)
 ```
 
 ## Building
@@ -226,3 +229,134 @@ The project uses `rustfmt` with a 120-character line width (configured in `rustf
 ```sh
 cargo fmt
 ```
+## Cross-compiling from Mac
+
+Two scripts in the `scripts/` directory automate cross-compilation setup and building:
+
+### One-step build for all targets
+
+Run `build-all.sh` to install all required toolchains (if not already present) and then build release binaries for the native Mac target, Linux (GNU and musl), and Windows:
+
+```sh
+scripts/build-all.sh
+```
+
+Binaries are placed in `target/<target>/release/`.
+
+### Setup only
+
+To install cross-compilation dependencies without building, run the setup script on its own. It is idempotent and safe to run multiple times:
+
+```sh
+scripts/setup-cross-compile.sh
+```
+
+This installs:
+- Rustup targets for Linux (GNU and musl) and Windows
+- Homebrew cross-compiler toolchains (`messense/macos-cross-toolchains`, `FiloSottile/musl-cross`, `mingw-w64`)
+- Cargo linker configuration in `.cargo/config.toml`
+
+See the sections below for manual step-by-step instructions for each target.
+
+## Cross-compile from Mac to Linux
+To cross-compile a Rust program for Linux on a Mac, you need to install the target toolchain using rustup and provide a compatible C linker for the target system. This process is straightforward and does not require a virtual machine.
+
+### Prerequisites
+Have Rust and cargo installed via rustup.rs.
+Have Homebrew installed for easier cross-compiler toolchain installation.
+
+### Step-by-Step Guide
+#### Add the target platform
+Use rustup to add the desired Linux target architecture's standard library. The most common target for generic Linux systems is `x86_64-unknown-linux-gnu` or `x86_64-unknown-linux-musl` (for a static binary).
+
+```bash
+rustup target add x86_64-unknown-linux-gnu
+# Or for a static binary (often easier to run on various Linux systems):
+rustup target add x86_64-unknown-linux-musl
+```
+
+#### Install a C linker
+Rust needs an external C compiler/linker for the target platform to produce the final executable, as some parts of the standard library rely on the system's C library.
+
+For the gnu target, you can use the `messense/homebrew-macos-cross-toolchains` tap.  This may take a while to install because it builds a lot of pieces:
+
+```bash
+brew tap messense/macos-cross-toolchains
+brew install x86_64-unknown-linux-gnu
+```
+
+For the musl target (static linking), you can use the `FiloSottile/musl-cross` tap.  This may take a while to install because it builds a lot of pieces:
+
+```bash
+brew tap FiloSottile/musl-cross
+brew install FiloSottile/musl-cross/musl-cross
+```
+
+#### Configure Cargo
+Tell Cargo which linker to use for the specific target by creating or editing the `.cargo/config` file in your project's root directory.
+
+For the gnu target, add these lines to `.cargo/config`:
+```ini
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-unknown-linux-gnu-gcc"
+```
+
+For the musl target, add these lines instead:
+
+```ini
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+```
+
+Alternatively, you can set the environment variable when building, e.g., `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-unknown-linux-gnu-gcc`.
+
+#### Build your project
+You can now build your Rust project using the --target flag:
+
+```bash
+cargo build --release --target x86_64-unknown-linux-gnu
+# or
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+The resulting Linux binary will be in the `target/<target_name>/release/` directory.
+
+## Cross-compile from Mac to Windows
+To cross-compile a Rust program for Windows from a Mac, you need to use the GNU toolchain for Windows targets, install a specific linker via Homebrew, and configure Cargo to use it.
+
+### Prerequisites
+Rust and Cargo: Ensure Rust is installed using rustup on your Mac.
+Homebrew: The macOS package manager is recommended for installing the necessary linker.
+Target Architecture: The most common target is the 64-bit Windows GNU toolchain: `x86_64-pc-windows-gnu`.
+
+### Step-by-Step Guide
+- Add the Windows target to Rustup: This command installs the Rust standard library and compiler components for the target platform.
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+```
+
+#### Install the MinGW linker:
+Rust needs a C linker for the target architecture. The mingw-w64 package provides the necessary `x86_64-w64-mingw32-gcc` linker.
+
+```bash
+brew install mingw-w64
+```
+
+#### Configure Cargo:
+You need to tell Cargo to use the newly installed linker for the specific target. Create or edit the `.cargo/config.toml` file in your project's root directory (next to Cargo.toml).Add the following lines to the configuration file:
+
+```toml
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+```
+
+This configuration specifies the linker path, which is required; otherwise, Cargo will report a "linker not found" error.
+Build your project for Windows: You can now build your Rust project, specifying the Windows target using the --target flag.
+
+```bash
+cargo build --target x86_64-pc-windows-gnu --release
+```
+
+The compiled Windows executable (.exe file) will be located in the `target/x86_64-pc-windows-gnu/release/` directory.
