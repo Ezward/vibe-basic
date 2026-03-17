@@ -9,15 +9,24 @@ cd "$PROJECT_DIR"
 echo "=== Running setup ==="
 "$SCRIPT_DIR/setup-cross-compile.sh"
 
-# Detect native Mac target
+# Detect native target and OS
 NATIVE_TARGET="$(rustc -vV | awk '/^host:/ { print $2 }')"
+OS="$(uname -s)"
 
-TARGETS=(
-    "$NATIVE_TARGET"
-    x86_64-unknown-linux-gnu
-    x86_64-unknown-linux-musl
-    x86_64-pc-windows-gnu
-)
+# Build target list based on OS
+TARGETS=("$NATIVE_TARGET")
+
+if [ "$OS" = "Darwin" ]; then
+    TARGETS+=(
+        x86_64-unknown-linux-gnu
+        x86_64-unknown-linux-musl
+        x86_64-pc-windows-gnu
+    )
+elif [ "$OS" = "Linux" ]; then
+    TARGETS+=(
+        x86_64-pc-windows-gnu
+    )
+fi
 
 FAILED=()
 
