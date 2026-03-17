@@ -41,10 +41,12 @@ if [ "$BUILD_ALL" = true ]; then
             x86_64-unknown-linux-gnu
             x86_64-unknown-linux-musl
             x86_64-pc-windows-gnu
+            aarch64-pc-windows-gnullvm
         )
     elif [ "$OS" = "Linux" ]; then
         TARGETS+=(
             x86_64-pc-windows-gnu
+            aarch64-pc-windows-gnullvm
         )
     fi
     # Windows: no cross-compile targets, native only

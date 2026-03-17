@@ -19,6 +19,62 @@ esac
 
 echo "=== Cross-compilation setup (${OS}) ==="
 
+# --- llvm-mingw for ARM Windows cross-compilation ---
+
+LLVM_MINGW_DIR="$HOME/.local/share/llvm-mingw"
+
+install_llvm_mingw() {
+    if [ -x "$LLVM_MINGW_DIR/bin/aarch64-w64-mingw32-clang" ]; then
+        echo "[skip] llvm-mingw already installed at ${LLVM_MINGW_DIR}"
+    else
+        echo "[install] Downloading llvm-mingw (ARM Windows cross-compiler)..."
+        local arch platform tag url tmpdir
+        arch="$(uname -m)"
+
+        # Get latest release tag from GitHub
+        tag="$(curl -sL https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')"
+        if [ -z "$tag" ]; then
+            echo "[error] Failed to determine latest llvm-mingw release"
+            return 1
+        fi
+
+        if [ "$OS" = "Darwin" ]; then
+            platform="macos-universal"
+        else
+            # Determine the Ubuntu version suffix used in llvm-mingw release asset names
+            local ubuntu_ver
+            ubuntu_ver="$(curl -fsSL "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/tags/${tag}" \
+                | grep -o "ucrt-ubuntu-[0-9.]*-${arch}" | head -1 | sed "s/ucrt-//;s/-${arch}//")"
+            if [ -z "$ubuntu_ver" ]; then
+                ubuntu_ver="ubuntu-22.04"
+            fi
+            platform="${ubuntu_ver}-${arch}"
+        fi
+
+        url="https://github.com/mstorsjo/llvm-mingw/releases/download/${tag}/llvm-mingw-${tag}-ucrt-${platform}.tar.xz"
+        echo "[install] Downloading ${url}..."
+
+        tmpdir="$(mktemp -d)"
+        if ! curl -fSL "$url" -o "$tmpdir/llvm-mingw.tar.xz"; then
+            echo "[error] Failed to download llvm-mingw from ${url}"
+            rm -rf "$tmpdir"
+            return 1
+        fi
+        if ! tar -xJf "$tmpdir/llvm-mingw.tar.xz" -C "$tmpdir"; then
+            echo "[error] Failed to extract llvm-mingw"
+            rm -rf "$tmpdir"
+            return 1
+        fi
+        rm -f "$tmpdir/llvm-mingw.tar.xz"
+
+        mkdir -p "$(dirname "$LLVM_MINGW_DIR")"
+        rm -rf "$LLVM_MINGW_DIR"
+        mv "$tmpdir"/llvm-mingw-* "$LLVM_MINGW_DIR"
+        rm -rf "$tmpdir"
+        echo "[ok] llvm-mingw installed to ${LLVM_MINGW_DIR}"
+    fi
+}
+
 # --- Rustup targets ---
 
 add_rustup_target() {
@@ -38,11 +94,14 @@ if [ "$OS" = "Darwin" ]; then
     add_rustup_target x86_64-unknown-linux-gnu
     add_rustup_target x86_64-unknown-linux-musl
     add_rustup_target x86_64-pc-windows-gnu
+    add_rustup_target aarch64-pc-windows-gnullvm
 elif [ "$OS" = "Linux" ]; then
     add_rustup_target x86_64-pc-windows-gnu
+    add_rustup_target aarch64-pc-windows-gnullvm
 elif [ "$OS" = "Windows" ]; then
     # Ensure the native MSVC target is available (usually installed by default)
     add_rustup_target x86_64-pc-windows-msvc
+    add_rustup_target aarch64-pc-windows-msvc
     echo "[info] No cross-compilation packages needed on Windows"
 fi
 
@@ -81,8 +140,11 @@ if [ "$OS" = "Darwin" ]; then
     add_brew_tap FiloSottile/musl-cross
     install_brew_package FiloSottile/musl-cross/musl-cross musl-cross
 
-    # Windows MinGW cross-compiler
+    # Windows MinGW cross-compiler (x86_64)
     install_brew_package mingw-w64 mingw-w64
+
+    # ARM Windows cross-compiler (llvm-mingw)
+    install_llvm_mingw
 
 elif [ "$OS" = "Linux" ]; then
     # Detect Linux package manager
@@ -147,12 +209,15 @@ elif [ "$OS" = "Linux" ]; then
         }
     fi
 
-    # The mingw-w64 gcc package name varies by distro
+    # The mingw-w64 gcc package name varies by distro (x86_64)
     case "$DISTRO_FAMILY" in
         debian) install_linux_package mingw-w64 ;;
         fedora) install_linux_package mingw64-gcc ;;
         arch)   install_linux_package mingw-w64-gcc ;;
     esac
+
+    # ARM Windows cross-compiler (llvm-mingw)
+    install_llvm_mingw
 
 elif [ "$OS" = "Windows" ]; then
     echo "--- Windows packages ---"
@@ -203,12 +268,20 @@ if [ "$OS" = "Darwin" ]; then
         '[target.x86_64-pc-windows-gnu]' \
         'linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-ar"'
+
+    ensure_cargo_config_section \
+        '[target.aarch64-pc-windows-gnullvm]' \
+        "linker = \"${LLVM_MINGW_DIR}/bin/aarch64-w64-mingw32-clang\""
 fi
 
 if [ "$OS" = "Linux" ]; then
     ensure_cargo_config_section \
         '[target.x86_64-pc-windows-gnu]' \
         'linker = "x86_64-w64-mingw32-gcc"'
+
+    ensure_cargo_config_section \
+        '[target.aarch64-pc-windows-gnullvm]' \
+        "linker = \"${LLVM_MINGW_DIR}/bin/aarch64-w64-mingw32-clang\""
 fi
 
 # Windows native builds need no special Cargo linker configuration
@@ -224,8 +297,10 @@ if [ "$OS" = "Darwin" ]; then
     echo "  cargo build --release --target x86_64-unknown-linux-gnu"
     echo "  cargo build --release --target x86_64-unknown-linux-musl"
     echo "  cargo build --release --target x86_64-pc-windows-gnu"
+    echo "  cargo build --release --target aarch64-pc-windows-gnullvm"
 elif [ "$OS" = "Linux" ]; then
     echo ""
     echo "Cross-compile targets:"
     echo "  cargo build --release --target x86_64-pc-windows-gnu"
+    echo "  cargo build --release --target aarch64-pc-windows-gnullvm"
 fi
