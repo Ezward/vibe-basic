@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.png" alt="Vibe Basic" width="256"/>
+</p>
+
 # Vibe Basic Interpreter
 
 A BASIC language interpreter written in Rust, implementing a subset of classic MS-BASIC (GW-BASIC style) with line-numbered programs, arithmetic expressions, string handling, and control flow.
