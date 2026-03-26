@@ -45,6 +45,10 @@ pub struct Interpreter<R: BufRead, W: Write> {
     background_color: u8,
     /// Current border color (0-15, default 0 = black)
     border_color: u8,
+    /// Whether screen positioning commands (LOCATE, CLS) have been used.
+    /// When true, PRINT emits an ANSI clear-to-end-of-line escape before
+    /// each newline so that repositioned text does not leave stale characters.
+    screen_mode_active: bool,
 }
 
 /// Tracks the return address for a GOSUB call.
@@ -71,6 +75,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             foreground_color: 7,
             background_color: 0,
             border_color: 0,
+            screen_mode_active: false,
         }
     }
 
@@ -525,7 +530,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     /// semicolons suppress spacing, and a trailing separator suppresses the newline.
     pub(crate) fn execute_print(&mut self, items: &[PrintItem]) -> Result<(), String> {
         if items.is_empty() {
-            writeln!(self.output).map_err(|e| e.to_string())?;
+            self.write_eol()?;
             self.column = 0;
             return Ok(());
         }
@@ -555,11 +560,22 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         }
 
         if !trailing_separator {
-            writeln!(self.output).map_err(|e| e.to_string())?;
+            self.write_eol()?;
             self.column = 0;
         }
 
         Ok(())
+    }
+
+    /// Writes an end-of-line sequence. When screen positioning commands have been
+    /// used, emits an ANSI clear-to-end-of-line escape (`\x1b[K`) before the newline
+    /// so that repositioned text does not leave stale characters from previous output.
+    fn write_eol(&mut self) -> Result<(), String> {
+        if self.screen_mode_active {
+            writeln!(self.output, "\x1b[K").map_err(|e| e.to_string())
+        } else {
+            writeln!(self.output).map_err(|e| e.to_string())
+        }
     }
 
     /// Executes an INPUT statement: prints an optional prompt, reads a line,
@@ -663,6 +679,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
         start: &Option<crate::expr::Expr>,
         stop: &Option<crate::expr::Expr>,
     ) -> Result<(), String> {
+        self.screen_mode_active = true;
         let row_val = match row {
             Some(expr) => {
                 let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
@@ -747,6 +764,7 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     /// Executes a CLS statement using ANSI escape codes to clear the screen.
     /// CLS [n] — in text mode: 0 or no argument clears entire screen, 2 clears text window.
     fn execute_cls(&mut self, mode: &Option<crate::expr::Expr>) -> Result<(), String> {
+        self.screen_mode_active = true;
         let mode_val = match mode {
             Some(expr) => self.evaluator.eval_expr(expr)?.as_number()? as i32,
             None => 0,
@@ -3587,7 +3605,7 @@ mod tests {
     #[test]
     fn test_locate_with_print() {
         let output = run_program("10 LOCATE 5, 10\n20 PRINT \"HELLO\"\n30 END\n").unwrap();
-        assert_eq!(output, "\x1b[5;10HHELLO\n");
+        assert_eq!(output, "\x1b[5;10HHELLO\x1b[K\n");
     }
 
     #[test]
@@ -3720,13 +3738,13 @@ mod tests {
     #[test]
     fn test_cls_then_locate_then_print() {
         let output = run_program("10 CLS\n20 LOCATE 1, 1\n30 PRINT \"HELLO\"\n40 END\n").unwrap();
-        assert_eq!(output, "\x1b[2J\x1b[H\x1b[1;1HHELLO\n");
+        assert_eq!(output, "\x1b[2J\x1b[H\x1b[1;1HHELLO\x1b[K\n");
     }
 
     #[test]
     fn test_color_locate_print_combo() {
         let output = run_program("10 COLOR 14, 1\n20 LOCATE 10, 20\n30 PRINT \"TEST\"\n40 END\n").unwrap();
-        assert_eq!(output, "\x1b[93;44m\x1b[10;20HTEST\n");
+        assert_eq!(output, "\x1b[93;44m\x1b[10;20HTEST\x1b[K\n");
     }
 
     #[test]
@@ -3759,5 +3777,50 @@ mod tests {
     fn test_color_with_expression() {
         let output = run_program("10 FG = 14\n20 BG = 1\n30 COLOR FG, BG\n40 END\n").unwrap();
         assert_eq!(output, "\x1b[93;44m");
+    }
+
+    // ===== Clear-to-EOL behavior tests =====
+
+    #[test]
+    fn test_print_no_clear_eol_without_screen_commands() {
+        // Without LOCATE/CLS, PRINT should not emit \x1b[K
+        let output = run_program("10 PRINT \"HELLO\"\n20 END\n").unwrap();
+        assert_eq!(output, "HELLO\n");
+        assert!(!output.contains("\x1b[K"));
+    }
+
+    #[test]
+    fn test_print_clear_eol_after_locate() {
+        // After LOCATE, PRINT newlines should include \x1b[K to clear remaining line
+        let output = run_program("10 LOCATE 1, 1\n20 PRINT \"HI\"\n30 END\n").unwrap();
+        assert!(output.contains("\x1b[K\n"));
+    }
+
+    #[test]
+    fn test_print_clear_eol_after_cls() {
+        // After CLS, PRINT newlines should include \x1b[K
+        let output = run_program("10 CLS\n20 PRINT \"HI\"\n30 END\n").unwrap();
+        assert!(output.contains("\x1b[K\n"));
+    }
+
+    #[test]
+    fn test_empty_print_clear_eol_after_locate() {
+        // Empty PRINT (blank line) should also clear to EOL after screen commands
+        let output = run_program("10 LOCATE 1, 1\n20 PRINT\n30 END\n").unwrap();
+        assert!(output.contains("\x1b[K\n"));
+    }
+
+    #[test]
+    fn test_print_semicolon_no_clear_eol() {
+        // PRINT with trailing semicolon (no newline) should not emit \x1b[K
+        let output = run_program("10 LOCATE 1, 1\n20 PRINT \"HI\";\n30 END\n").unwrap();
+        assert!(!output.contains("\x1b[K"));
+    }
+
+    #[test]
+    fn test_multiple_prints_all_clear_eol() {
+        // All PRINT newlines after LOCATE should clear EOL
+        let output = run_program("10 LOCATE 1, 1\n20 PRINT \"A\"\n30 PRINT \"B\"\n40 END\n").unwrap();
+        assert_eq!(output, "\x1b[1;1HA\x1b[K\nB\x1b[K\n");
     }
 }
