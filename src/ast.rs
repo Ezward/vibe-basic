@@ -76,6 +76,24 @@ pub enum Statement {
     Return {
         target: Option<Expr>,
     },
+    /// LOCATE [row][,[col][,[cursor][,[start][,stop]]]]
+    Locate {
+        row: Option<Expr>,
+        col: Option<Expr>,
+        cursor: Option<Expr>,
+        start: Option<Expr>,
+        stop: Option<Expr>,
+    },
+    /// CLS [n] — clear screen (text mode only, n=0 or n=2 or no argument)
+    Cls {
+        mode: Option<Expr>,
+    },
+    /// COLOR [foreground][,[background][,border]] — set text colors (SCREEN 0)
+    Color {
+        foreground: Option<Expr>,
+        background: Option<Expr>,
+        border: Option<Expr>,
+    },
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -90,7 +108,7 @@ pub enum PrintItem {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThenClause {
     LineNumber(u32),
-    Statement(Statement),
+    Statement(Box<Statement>),
 }
 
 /// A parsed BASIC line: line number + one or more statements
@@ -326,6 +344,18 @@ impl<'a> Parser<'a> {
                 };
                 Ok(Statement::Return { target })
             }
+            Token::Locate => {
+                self.advance();
+                self.parse_locate()
+            }
+            Token::Cls => {
+                self.advance();
+                self.parse_cls()
+            }
+            Token::Color => {
+                self.advance();
+                self.parse_color()
+            }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
                 self.parse_let_body()
@@ -405,7 +435,7 @@ impl<'a> Parser<'a> {
             self.advance();
             ThenClause::LineNumber(n as u32)
         } else {
-            ThenClause::Statement(self.parse_statement()?)
+            ThenClause::Statement(Box::new(self.parse_statement()?))
         };
         // Optional ELSE clause
         let else_clause = if *self.peek() == Token::Else {
@@ -414,7 +444,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 ThenClause::LineNumber(n as u32)
             } else {
-                ThenClause::Statement(self.parse_statement()?)
+                ThenClause::Statement(Box::new(self.parse_statement()?))
             };
             Some(Box::new(clause))
         } else {
@@ -709,6 +739,77 @@ impl<'a> Parser<'a> {
         }
         Ok(Statement::OnGosub { selector, targets })
     }
+
+    /// Parses a LOCATE statement: `LOCATE [row][,[col][,[cursor][,[start][,stop]]]]`.
+    /// All parameters are optional and may be omitted by using consecutive commas.
+    fn parse_locate(&mut self) -> Result<Statement, String> {
+        let mut params: Vec<Option<Expr>> = Vec::new();
+        // Parse up to 5 optional comma-separated parameters
+        for i in 0..5 {
+            if self.at_statement_end() {
+                break;
+            }
+            if i > 0 {
+                if *self.peek() == Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            // Check if this parameter is omitted (next token is comma, end of statement, or we're done)
+            if self.at_statement_end() || *self.peek() == Token::Comma {
+                params.push(None);
+            } else {
+                params.push(Some(self.parse_expression()?));
+            }
+        }
+        Ok(Statement::Locate {
+            row: params.first().cloned().flatten(),
+            col: params.get(1).cloned().flatten(),
+            cursor: params.get(2).cloned().flatten(),
+            start: params.get(3).cloned().flatten(),
+            stop: params.get(4).cloned().flatten(),
+        })
+    }
+
+    /// Parses a CLS statement: `CLS [n]`.
+    fn parse_cls(&mut self) -> Result<Statement, String> {
+        let mode = if self.at_statement_end() {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        Ok(Statement::Cls { mode })
+    }
+
+    /// Parses a COLOR statement: `COLOR [foreground][,[background][,border]]`.
+    /// All parameters are optional and may be omitted.
+    fn parse_color(&mut self) -> Result<Statement, String> {
+        let mut params: Vec<Option<Expr>> = Vec::new();
+        // Parse up to 3 optional comma-separated parameters
+        for i in 0..3 {
+            if self.at_statement_end() {
+                break;
+            }
+            if i > 0 {
+                if *self.peek() == Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            if self.at_statement_end() || *self.peek() == Token::Comma {
+                params.push(None);
+            } else {
+                params.push(Some(self.parse_expression()?));
+            }
+        }
+        Ok(Statement::Color {
+            foreground: params.first().cloned().flatten(),
+            background: params.get(1).cloned().flatten(),
+            border: params.get(2).cloned().flatten(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -856,9 +957,9 @@ mod tests {
                     left: Box::new(Expr::Variable("G".to_string())),
                     right: Box::new(Expr::Variable("X".to_string())),
                 },
-                then: Box::new(ThenClause::Statement(Statement::Print {
+                then: Box::new(ThenClause::Statement(Box::new(Statement::Print {
                     items: vec![PrintItem::Expression(Expr::StringLiteral("CORRECT!".to_string()))],
-                })),
+                }))),
                 else_clause: None,
             }
         );
@@ -875,7 +976,7 @@ mod tests {
                     left: Box::new(Expr::Variable("X".to_string())),
                     right: Box::new(Expr::Number(3.0)),
                 },
-                then: Box::new(ThenClause::Statement(Statement::Goto { line_number: 30 })),
+                then: Box::new(ThenClause::Statement(Box::new(Statement::Goto { line_number: 30 }))),
                 else_clause: None,
             }
         );
@@ -1137,7 +1238,7 @@ mod tests {
         let stmt = parse_single_statement("50 IF N / D = INT(N / D) THEN ISPRIME = 0");
         assert!(matches!(stmt, Statement::If { .. }));
         if let Statement::If { then, .. } = stmt {
-            assert!(matches!(*then, ThenClause::Statement(Statement::Let { .. })));
+            assert!(matches!(*then, ThenClause::Statement(ref s) if matches!(**s, Statement::Let { .. })));
         }
     }
 
@@ -1152,12 +1253,12 @@ mod tests {
                     left: Box::new(Expr::Variable("G".to_string())),
                     right: Box::new(Expr::Variable("X".to_string())),
                 },
-                then: Box::new(ThenClause::Statement(Statement::Print {
+                then: Box::new(ThenClause::Statement(Box::new(Statement::Print {
                     items: vec![PrintItem::Expression(Expr::StringLiteral("YES".to_string()))],
-                })),
-                else_clause: Some(Box::new(ThenClause::Statement(Statement::Print {
-                    items: vec![PrintItem::Expression(Expr::StringLiteral("NO".to_string()))],
                 }))),
+                else_clause: Some(Box::new(ThenClause::Statement(Box::new(Statement::Print {
+                    items: vec![PrintItem::Expression(Expr::StringLiteral("NO".to_string()))],
+                })))),
             }
         );
     }
@@ -1192,7 +1293,7 @@ mod tests {
         if let Statement::If { else_clause, .. } = stmt {
             assert!(matches!(
                 *else_clause.unwrap(),
-                ThenClause::Statement(Statement::Goto { line_number: 100 })
+                ThenClause::Statement(ref s) if matches!(**s, Statement::Goto { line_number: 100 })
             ));
         }
     }
@@ -1649,7 +1750,7 @@ mod tests {
         let stmt = parse_single_statement("10 IF X = 1 THEN GOSUB 100");
         assert!(matches!(stmt, Statement::If { .. }));
         if let Statement::If { then, .. } = stmt {
-            assert!(matches!(*then, ThenClause::Statement(Statement::Gosub { .. })));
+            assert!(matches!(*then, ThenClause::Statement(ref s) if matches!(**s, Statement::Gosub { .. })));
         }
     }
 
@@ -1738,5 +1839,184 @@ mod tests {
         );
         assert_eq!(prog.lines.len(), 6);
         assert!(matches!(prog.lines[0].statements[0], Statement::OnGosub { .. }));
+    }
+
+    #[test]
+    fn test_parse_cls_no_args() {
+        let stmt = parse_single_statement("10 CLS");
+        assert_eq!(stmt, Statement::Cls { mode: None });
+    }
+
+    #[test]
+    fn test_parse_cls_with_arg() {
+        let stmt = parse_single_statement("10 CLS 2");
+        assert_eq!(
+            stmt,
+            Statement::Cls {
+                mode: Some(Expr::Number(2.0))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_row_col() {
+        let stmt = parse_single_statement("10 LOCATE 1, 1");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: Some(Expr::Number(1.0)),
+                col: Some(Expr::Number(1.0)),
+                cursor: None,
+                start: None,
+                stop: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_all_params() {
+        let stmt = parse_single_statement("10 LOCATE 5, 1, 1, 0, 7");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: Some(Expr::Number(5.0)),
+                col: Some(Expr::Number(1.0)),
+                cursor: Some(Expr::Number(1.0)),
+                start: Some(Expr::Number(0.0)),
+                stop: Some(Expr::Number(7.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_omitted_params() {
+        let stmt = parse_single_statement("10 LOCATE ,,1");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: None,
+                col: None,
+                cursor: Some(Expr::Number(1.0)),
+                start: None,
+                stop: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_row_only() {
+        let stmt = parse_single_statement("10 LOCATE 10");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: Some(Expr::Number(10.0)),
+                col: None,
+                cursor: None,
+                start: None,
+                stop: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_no_args() {
+        let stmt = parse_single_statement("10 LOCATE");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: None,
+                col: None,
+                cursor: None,
+                start: None,
+                stop: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_color_all_params() {
+        let stmt = parse_single_statement("10 COLOR 7, 0, 3");
+        assert_eq!(
+            stmt,
+            Statement::Color {
+                foreground: Some(Expr::Number(7.0)),
+                background: Some(Expr::Number(0.0)),
+                border: Some(Expr::Number(3.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_color_fg_only() {
+        let stmt = parse_single_statement("10 COLOR 14");
+        assert_eq!(
+            stmt,
+            Statement::Color {
+                foreground: Some(Expr::Number(14.0)),
+                background: None,
+                border: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_color_no_args() {
+        let stmt = parse_single_statement("10 COLOR");
+        assert_eq!(
+            stmt,
+            Statement::Color {
+                foreground: None,
+                background: None,
+                border: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_color_omitted_fg() {
+        let stmt = parse_single_statement("10 COLOR ,2");
+        assert_eq!(
+            stmt,
+            Statement::Color {
+                foreground: None,
+                background: Some(Expr::Number(2.0)),
+                border: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_locate_with_expressions() {
+        let stmt = parse_single_statement("10 LOCATE R, C");
+        assert_eq!(
+            stmt,
+            Statement::Locate {
+                row: Some(Expr::Variable("R".to_string())),
+                col: Some(Expr::Variable("C".to_string())),
+                cursor: None,
+                start: None,
+                stop: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_cls_on_multi_statement_line() {
+        let prog = parse_program("10 CLS : PRINT \"HELLO\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Cls { mode: None }));
+    }
+
+    #[test]
+    fn test_parse_color_fg_bg() {
+        let stmt = parse_single_statement("10 COLOR 1, 2");
+        assert_eq!(
+            stmt,
+            Statement::Color {
+                foreground: Some(Expr::Number(1.0)),
+                background: Some(Expr::Number(2.0)),
+                border: None,
+            }
+        );
     }
 }

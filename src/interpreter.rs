@@ -39,6 +39,12 @@ pub struct Interpreter<R: BufRead, W: Write> {
     column: usize,
     data_pool: Vec<DataEntry>,
     data_pointer: usize,
+    /// Current text foreground color (0-31, default 7 = white/light gray)
+    foreground_color: u8,
+    /// Current text background color (0-7, default 0 = black)
+    background_color: u8,
+    /// Current border color (0-15, default 0 = black)
+    border_color: u8,
 }
 
 /// Tracks the return address for a GOSUB call.
@@ -62,6 +68,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             column: 0,
             data_pool: Vec::new(),
             data_pointer: 0,
+            foreground_color: 7,
+            background_color: 0,
+            border_color: 0,
         }
     }
 
@@ -464,6 +473,28 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                 };
                 Ok(StmtResult::Return(target_line))
             }
+            Statement::Locate {
+                row,
+                col,
+                cursor,
+                start,
+                stop,
+            } => {
+                self.execute_locate(row, col, cursor, start, stop)?;
+                Ok(StmtResult::Continue)
+            }
+            Statement::Cls { mode } => {
+                self.execute_cls(mode)?;
+                Ok(StmtResult::Continue)
+            }
+            Statement::Color {
+                foreground,
+                background,
+                border,
+            } => {
+                self.execute_color(foreground, background, border)?;
+                Ok(StmtResult::Continue)
+            }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
         }
@@ -572,6 +603,205 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             self.evaluator.set_array_element(variable, &subs, value)?;
         }
         self.column = 0;
+        Ok(())
+    }
+
+    /// Maps a GW-BASIC color number (0-15) to the corresponding ANSI SGR color code.
+    /// Colors 0-7 map to ANSI codes 30-37 (normal), colors 8-15 map to 90-97 (bright).
+    fn basic_fg_to_ansi(color: u8) -> &'static str {
+        match color & 0x0F {
+            0 => "30",  // Black
+            1 => "34",  // Blue
+            2 => "32",  // Green
+            3 => "36",  // Cyan
+            4 => "31",  // Red
+            5 => "35",  // Magenta
+            6 => "33",  // Brown/Yellow
+            7 => "37",  // White/Light gray
+            8 => "90",  // Dark gray (bright black)
+            9 => "94",  // Light blue
+            10 => "92", // Light green
+            11 => "96", // Light cyan
+            12 => "91", // Light red
+            13 => "95", // Light magenta
+            14 => "93", // Yellow
+            15 => "97", // Bright white
+            _ => "37",  // Fallback
+        }
+    }
+
+    /// Maps a GW-BASIC background color number (0-7) to the corresponding ANSI SGR background code.
+    fn basic_bg_to_ansi(color: u8) -> &'static str {
+        match color & 0x07 {
+            0 => "40", // Black
+            1 => "44", // Blue
+            2 => "42", // Green
+            3 => "46", // Cyan
+            4 => "41", // Red
+            5 => "45", // Magenta
+            6 => "43", // Brown/Yellow
+            7 => "47", // White
+            _ => "40", // Fallback
+        }
+    }
+
+    /// Emits ANSI escape codes to set the current foreground and background colors.
+    fn emit_color_ansi(&mut self) -> Result<(), String> {
+        let blink = if self.foreground_color >= 16 { ";5" } else { "" };
+        let fg = Self::basic_fg_to_ansi(self.foreground_color);
+        let bg = Self::basic_bg_to_ansi(self.background_color);
+        write!(self.output, "\x1b[{}{};{}m", fg, blink, bg).map_err(|e| e.to_string())
+    }
+
+    /// Executes a LOCATE statement using ANSI escape codes for cursor positioning.
+    /// LOCATE [row][,[col][,[cursor][,[start][,stop]]]]
+    fn execute_locate(
+        &mut self,
+        row: &Option<crate::expr::Expr>,
+        col: &Option<crate::expr::Expr>,
+        cursor: &Option<crate::expr::Expr>,
+        start: &Option<crate::expr::Expr>,
+        stop: &Option<crate::expr::Expr>,
+    ) -> Result<(), String> {
+        let row_val = match row {
+            Some(expr) => {
+                let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+                if !(1..=25).contains(&v) {
+                    return Err("Illegal function call".to_string());
+                }
+                Some(v)
+            }
+            None => None,
+        };
+        let col_val = match col {
+            Some(expr) => {
+                let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+                if !(1..=80).contains(&v) {
+                    return Err("Illegal function call".to_string());
+                }
+                Some(v)
+            }
+            None => None,
+        };
+        let cursor_val = match cursor {
+            Some(expr) => Some(self.evaluator.eval_expr(expr)?.as_number()? as i32),
+            None => None,
+        };
+        let _start_val = match start {
+            Some(expr) => {
+                let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+                if !(0..=31).contains(&v) {
+                    return Err("Illegal function call".to_string());
+                }
+                Some(v)
+            }
+            None => None,
+        };
+        let _stop_val = match stop {
+            Some(expr) => {
+                let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+                if !(0..=31).contains(&v) {
+                    return Err("Illegal function call".to_string());
+                }
+                Some(v)
+            }
+            None => None,
+        };
+
+        // Emit ANSI cursor position escape sequence
+        match (row_val, col_val) {
+            (Some(r), Some(c)) => {
+                write!(self.output, "\x1b[{};{}H", r, c).map_err(|e| e.to_string())?;
+                self.column = (c - 1) as usize;
+            }
+            (Some(r), None) => {
+                // Move to row, keep column (move to row, column 1 as default if unknown)
+                write!(self.output, "\x1b[{};1H", r).map_err(|e| e.to_string())?;
+                self.column = 0;
+            }
+            (None, Some(c)) => {
+                // Move to column only using cursor horizontal absolute
+                write!(self.output, "\x1b[{}G", c).map_err(|e| e.to_string())?;
+                self.column = (c - 1) as usize;
+            }
+            (None, None) => {
+                // No position change
+            }
+        }
+
+        // Handle cursor visibility
+        if let Some(v) = cursor_val {
+            if v == 0 {
+                write!(self.output, "\x1b[?25l").map_err(|e| e.to_string())?;
+            } else {
+                write!(self.output, "\x1b[?25h").map_err(|e| e.to_string())?;
+            }
+        }
+
+        // Note: start/stop scan lines for cursor shape are validated but not emitted
+        // since ANSI terminals don't support hardware cursor raster line control.
+
+        Ok(())
+    }
+
+    /// Executes a CLS statement using ANSI escape codes to clear the screen.
+    /// CLS [n] — in text mode: 0 or no argument clears entire screen, 2 clears text window.
+    fn execute_cls(&mut self, mode: &Option<crate::expr::Expr>) -> Result<(), String> {
+        let mode_val = match mode {
+            Some(expr) => self.evaluator.eval_expr(expr)?.as_number()? as i32,
+            None => 0,
+        };
+        match mode_val {
+            0 | 2 => {
+                // Clear entire screen and move cursor to upper-left corner
+                write!(self.output, "\x1b[2J\x1b[H").map_err(|e| e.to_string())?;
+                self.column = 0;
+            }
+            1 => {
+                // In text mode, CLS 1 (graphics viewport) is a no-op since we have no graphics
+                // Clear screen as a reasonable fallback
+                write!(self.output, "\x1b[2J\x1b[H").map_err(|e| e.to_string())?;
+                self.column = 0;
+            }
+            _ => {
+                return Err("Illegal function call".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// Executes a COLOR statement using ANSI escape codes for text coloring.
+    /// COLOR [foreground][,[background][,border]]
+    /// Foreground: 0-31 (0-15 normal, 16-31 blinking). Background: 0-7. Border: 0-15.
+    fn execute_color(
+        &mut self,
+        foreground: &Option<crate::expr::Expr>,
+        background: &Option<crate::expr::Expr>,
+        border: &Option<crate::expr::Expr>,
+    ) -> Result<(), String> {
+        if let Some(expr) = foreground {
+            let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+            if !(0..=31).contains(&v) {
+                return Err("Illegal function call".to_string());
+            }
+            self.foreground_color = v as u8;
+        }
+        if let Some(expr) = background {
+            let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+            if !(0..=7).contains(&v) {
+                return Err("Illegal function call".to_string());
+            }
+            self.background_color = v as u8;
+        }
+        if let Some(expr) = border {
+            let v = self.evaluator.eval_expr(expr)?.as_number()? as i32;
+            if !(0..=15).contains(&v) {
+                return Err("Illegal function call".to_string());
+            }
+            self.border_color = v as u8;
+        }
+        // Emit ANSI color codes
+        self.emit_color_ansi()?;
         Ok(())
     }
 
@@ -3245,5 +3475,289 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "REACHED\n");
+    }
+
+    // ===== CLS tests =====
+
+    #[test]
+    fn test_cls_no_args() {
+        let output = run_program("10 CLS\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn test_cls_zero() {
+        let output = run_program("10 CLS 0\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn test_cls_two() {
+        let output = run_program("10 CLS 2\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn test_cls_one() {
+        let output = run_program("10 CLS 1\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn test_cls_invalid_mode() {
+        let result = run_program("10 CLS 3\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_cls_resets_column() {
+        let output = run_program("10 PRINT \"HI\";\n20 CLS\n30 PRINT \"A\",\"B\"\n40 END\n").unwrap();
+        // After CLS, column resets to 0, so comma tab works from column 0
+        assert!(output.contains("\x1b[2J\x1b[H"));
+        assert!(output.contains("A"));
+    }
+
+    // ===== LOCATE tests =====
+
+    #[test]
+    fn test_locate_row_col() {
+        let output = run_program("10 LOCATE 1, 1\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[1;1H");
+    }
+
+    #[test]
+    fn test_locate_row_col_mid_screen() {
+        let output = run_program("10 LOCATE 12, 40\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[12;40H");
+    }
+
+    #[test]
+    fn test_locate_row_only() {
+        let output = run_program("10 LOCATE 5\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[5;1H");
+    }
+
+    #[test]
+    fn test_locate_col_only() {
+        let output = run_program("10 LOCATE ,10\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[10G");
+    }
+
+    #[test]
+    fn test_locate_cursor_visible() {
+        let output = run_program("10 LOCATE ,,1\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[?25h");
+    }
+
+    #[test]
+    fn test_locate_cursor_hidden() {
+        let output = run_program("10 LOCATE ,,0\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[?25l");
+    }
+
+    #[test]
+    fn test_locate_invalid_row_zero() {
+        let result = run_program("10 LOCATE 0, 1\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_locate_invalid_row_26() {
+        let result = run_program("10 LOCATE 26, 1\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_locate_invalid_col_zero() {
+        let result = run_program("10 LOCATE 1, 0\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_locate_invalid_col_81() {
+        let result = run_program("10 LOCATE 1, 81\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_locate_with_print() {
+        let output = run_program("10 LOCATE 5, 10\n20 PRINT \"HELLO\"\n30 END\n").unwrap();
+        assert_eq!(output, "\x1b[5;10HHELLO\n");
+    }
+
+    #[test]
+    fn test_locate_no_args() {
+        let output = run_program("10 LOCATE\n20 END\n").unwrap();
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_locate_with_scan_lines() {
+        let output = run_program("10 LOCATE 5, 1, 1, 0, 7\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[5;1H\x1b[?25h");
+    }
+
+    #[test]
+    fn test_locate_invalid_start_scan() {
+        let result = run_program("10 LOCATE ,,,32\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_locate_invalid_stop_scan() {
+        let result = run_program("10 LOCATE ,,,,32\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    // ===== COLOR tests =====
+
+    #[test]
+    fn test_color_default_white_on_black() {
+        let output = run_program("10 COLOR 7, 0\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[37;40m");
+    }
+
+    #[test]
+    fn test_color_red_on_blue() {
+        let output = run_program("10 COLOR 4, 1\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[31;44m");
+    }
+
+    #[test]
+    fn test_color_bright_yellow_on_green() {
+        let output = run_program("10 COLOR 14, 2\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[93;42m");
+    }
+
+    #[test]
+    fn test_color_blinking() {
+        let output = run_program("10 COLOR 23, 0\n20 END\n").unwrap();
+        // 23 = 7 + 16 (blinking white)
+        assert_eq!(output, "\x1b[37;5;40m");
+    }
+
+    #[test]
+    fn test_color_fg_only() {
+        let output = run_program("10 COLOR 1\n20 END\n").unwrap();
+        // Sets foreground to blue, background stays default (0=black)
+        assert_eq!(output, "\x1b[34;40m");
+    }
+
+    #[test]
+    fn test_color_with_border() {
+        let output = run_program("10 COLOR 7, 0, 3\n20 END\n").unwrap();
+        // Border is stored but only fg/bg emitted via ANSI (border is CGA-specific)
+        assert_eq!(output, "\x1b[37;40m");
+    }
+
+    #[test]
+    fn test_color_invalid_fg_too_high() {
+        let result = run_program("10 COLOR 32\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_color_invalid_fg_negative() {
+        let result = run_program("10 COLOR -1\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_color_invalid_bg_too_high() {
+        let result = run_program("10 COLOR 7, 8\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_color_invalid_border_too_high() {
+        let result = run_program("10 COLOR 7, 0, 16\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Illegal function call"));
+    }
+
+    #[test]
+    fn test_color_no_args_resets() {
+        let output = run_program("10 COLOR\n20 END\n").unwrap();
+        // No args: emit current defaults (fg=7, bg=0)
+        assert_eq!(output, "\x1b[37;40m");
+    }
+
+    #[test]
+    fn test_color_omitted_fg() {
+        // COLOR ,2 — foreground unchanged (default 7), background = 2
+        let output = run_program("10 COLOR ,2\n20 END\n").unwrap();
+        assert_eq!(output, "\x1b[37;42m");
+    }
+
+    #[test]
+    fn test_color_all_16_fg_colors() {
+        // Verify all 16 basic foreground colors produce valid ANSI output
+        for i in 0..16 {
+            let prog = format!("10 COLOR {}\n20 END\n", i);
+            let result = run_program(&prog);
+            assert!(result.is_ok(), "COLOR {} should succeed", i);
+            let output = result.unwrap();
+            assert!(output.starts_with("\x1b["), "COLOR {} should produce ANSI escape", i);
+        }
+    }
+
+    #[test]
+    fn test_color_then_print() {
+        let output = run_program("10 COLOR 1, 0\n20 PRINT \"HI\"\n30 END\n").unwrap();
+        assert_eq!(output, "\x1b[34;40mHI\n");
+    }
+
+    #[test]
+    fn test_cls_then_locate_then_print() {
+        let output = run_program("10 CLS\n20 LOCATE 1, 1\n30 PRINT \"HELLO\"\n40 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H\x1b[1;1HHELLO\n");
+    }
+
+    #[test]
+    fn test_color_locate_print_combo() {
+        let output = run_program("10 COLOR 14, 1\n20 LOCATE 10, 20\n30 PRINT \"TEST\"\n40 END\n").unwrap();
+        assert_eq!(output, "\x1b[93;44m\x1b[10;20HTEST\n");
+    }
+
+    #[test]
+    fn test_locate_in_loop() {
+        let output = run_program("10 FOR I = 1 TO 3\n20 LOCATE I, 1\n30 PRINT I;\n40 NEXT I\n50 END\n").unwrap();
+        assert!(output.contains("\x1b[1;1H"));
+        assert!(output.contains("\x1b[2;1H"));
+        assert!(output.contains("\x1b[3;1H"));
+    }
+
+    #[test]
+    fn test_cls_in_if_then() {
+        let output = run_program("10 X = 1\n20 IF X = 1 THEN CLS\n30 END\n").unwrap();
+        assert_eq!(output, "\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn test_color_in_if_then() {
+        let output = run_program("10 X = 1\n20 IF X = 1 THEN COLOR 4, 0\n30 END\n").unwrap();
+        assert_eq!(output, "\x1b[31;40m");
+    }
+
+    #[test]
+    fn test_locate_with_expression() {
+        let output = run_program("10 R = 5\n20 C = 10\n30 LOCATE R, C\n40 END\n").unwrap();
+        assert_eq!(output, "\x1b[5;10H");
+    }
+
+    #[test]
+    fn test_color_with_expression() {
+        let output = run_program("10 FG = 14\n20 BG = 1\n30 COLOR FG, BG\n40 END\n").unwrap();
+        assert_eq!(output, "\x1b[93;44m");
     }
 }
