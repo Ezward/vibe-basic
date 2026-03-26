@@ -3823,4 +3823,51 @@ mod tests {
         let output = run_program("10 LOCATE 1, 1\n20 PRINT \"A\"\n30 PRINT \"B\"\n40 END\n").unwrap();
         assert_eq!(output, "\x1b[1;1HA\x1b[K\nB\x1b[K\n");
     }
+
+    #[test]
+    fn test_nested_if_then_else_inner_else_branch() {
+        // IF...THEN linenum ELSE IF...THEN stmt ELSE stmt
+        // When the outer condition is false and the inner condition is also false,
+        // the inner ELSE branch should execute (not SkipLine).
+        let output = run_program(
+            "10 G = 75\n\
+             20 SECRET = 50\n\
+             30 IF G = SECRET THEN 100 ELSE IF G < SECRET THEN PRINT \"TOO LOW!\" ELSE PRINT \"TOO HIGH!\"\n\
+             40 END\n\
+             100 PRINT \"CORRECT!\"\n\
+             110 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "TOO HIGH!\n");
+    }
+
+    #[test]
+    fn test_nested_if_then_else_inner_then_branch() {
+        // Same structure but inner condition is true → inner THEN branch
+        let output = run_program(
+            "10 G = 25\n\
+             20 SECRET = 50\n\
+             30 IF G = SECRET THEN 100 ELSE IF G < SECRET THEN PRINT \"TOO LOW!\" ELSE PRINT \"TOO HIGH!\"\n\
+             40 END\n\
+             100 PRINT \"CORRECT!\"\n\
+             110 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "TOO LOW!\n");
+    }
+
+    #[test]
+    fn test_nested_if_then_else_outer_then_branch() {
+        // Outer condition is true → GOTO line 100
+        let output = run_program(
+            "10 G = 50\n\
+             20 SECRET = 50\n\
+             30 IF G = SECRET THEN 100 ELSE IF G < SECRET THEN PRINT \"TOO LOW!\" ELSE PRINT \"TOO HIGH!\"\n\
+             40 END\n\
+             100 PRINT \"CORRECT!\"\n\
+             110 END\n",
+        )
+        .unwrap();
+        assert_eq!(output, "CORRECT!\n");
+    }
 }
