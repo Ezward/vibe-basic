@@ -1,13 +1,14 @@
 100 REM *******************
-110 REM *  PIRATE ISLAND  *
+110 REM *  PIRATE ISALND  *
 120 REM *                 *
 130 REM *        BY       *
 140 REM *   DAVID MENY    *
 150 REM *******************
-160 CLS: REM KEY OFF:DEFINT A-Z
+155 SCREEN_TOP=1
+160 COLOR 7, 0:REM KEY OFF:DEFINT A-Z
 170 DIM A(45,6),O1$(20),O2$(20),TR(14),IN$(14),RO$(45)
 171 GOSUB 20000:REM INITIALIZE
-172 LOCATE 21,1
+172 CLS:LOCATE SCREEN_TOP,1
 173 PRINT "Pirate Island by David Meny"
 174 PRINT "Copyright 1985, Menco, Inc."
 175 PRINT
@@ -16,8 +17,8 @@
 178 PRINT "  You dream of adventourous fights to the death between pirates over gold-laced"
 179 PRINT "statues or chest of gold coins from a long time ago."
 180 PRINT "  You dream and dream until the rocking of the seas wakens you on board the ship"
-185 PRINT "'The Eagle's Nest', a pirate ship!":PRINT
-190 GOSUB 15000:REM PRINT SCORE
+185 PRINT "'The Eagle's Nest', a pirate ship!":PRINT:INPUT "What's your name, matey?";NAME$:PRINT
+190 GOSUB 15000:REM PRINT ROOM DESCRIPTION
 200 GOSUB 14000:REM PRINT ROOM CONTENTS
 210 IF START=1 THEN MV=MV+1 ELSE 219
 211 IF MV=10 THEN TR(2)=RO ELSE 219
@@ -28,7 +29,7 @@
 216 PRINT "'Congradulations!! We've come ashore on ze' old Pirate Island. Now go ashore by":PRINT "the east starboard deck.' The captain then hands you a bag of silver."
 217 PRINT "'Spend it wisely. It's your payment IF you don't come back.'":TR(2)=25:A(39,2)=22:FLAG97=1:TR(14)=200
 219 PRINT:INPUT ">",A$
-220 IF A$="" THEN PRINT "What?":GOTO 210
+220 IF A$="" THEN PRINT:PRINT "What?":GOTO 210
 230 AS=ASC(A$)
 240 IF AS<65 OR AS>90 THEN PRINT:PRINT "I can only use capital letters, matey.":GOTO 210
 245 IF A$="LOOK UNDER JULIUS" THEN GOSUB 8010:GOTO 210
@@ -75,14 +76,14 @@
 1500 REM SCORE
 1510 PRINT
 1520 PRINT "Out of 200 points, you got ";SCORE;" points."
-1521 PRINT "That gives you the rating of ";
+1521 PRINT $NAME; "That gives you the rating of ";
 1522 IF SCORE<50 THEN PRINT "a Deck boy."
 1523 IF SCORE>50 AND SCORE<100 THEN PRINT "a Sea Man."
 1524 IF SCORE>100 AND SCORE<150 THEN PRINT "a Bucaneer."
 1525 IF SCORE>150 THEN PRINT "a Sea Captain."
 1530 RETURN
 2000 REM QUIT
-2010 COLOR 0,7:LOCATE 25,50:PRINT "Score:";SCORE:COLOR 7,0:PRINT
+2010 COLOR 0,7:LOCATE SCREEN_TOP,50:PRINT "Score:";SCORE:COLOR 7,0:PRINT
 2020 PRINT "Out of 200 points, you got ";SCORE;" points."
 2021 PRINT "That gives you the rating of ";
 2022 IF SCORE<50 THEN PRINT "a Deck boy."
@@ -255,7 +256,7 @@
 8136 PRINT "    with his left eye, which made him put marks 5 degrees west"
 8137 PRINT "    of the original on longitude and latitude maps."
 8138 PRINT "    MORE?"
-8139 INPUT "Press ENTER to continue",F$
+8139 IF INKEY$="" THEN 8139
 8140 RETURN
 8150 IF RO<>42 THEN PRINT "You can't find information on that here. Try the ship's library open 24 hours a":PRINT "day!":RETURN
 8160 PRINT
@@ -290,7 +291,7 @@
 9040 IF F$="Y" OR F$="y" THEN GOTO 9090
 9050 IF F$="N" OR F$="n" THEN GOTO 9070
 9060 PRINT "Please answer the question.":GOTO 9020
-9070 PRINT:PRINT "Ok. See you next time on Pirate Island.":PRINT
+9070 PRINT:PRINT "Ok. See you next time on Pirate Island."
 9080 FOR I=1 TO 100:NEXT I:CLS:END
 9090 FLAG1=0:FLAG2=0:FLAG3=0:FLAG4=0:FLAG5=0:FLAG6=0:FLAG6=0:FLAG7=0:FLAG8=0:FLAG9=0:FLAG10=0:FLAG11=0:FLAG12=0:FLAG13=0:FLAG14=0:FLAG15=0:FLAG40=0:FLAG55=0:FLAG50=0:FLAG60=0:FLAG70=0:FLAG95=0:FLAG96=0:FLAG97=0:FLAG99=0:FLAG99=0:FLAG100=0
 9100 RO=26
@@ -305,12 +306,12 @@
 14036 FLAG99=1:JKH=I
 14040 NEXT
 14050 RETURN
-15000 REM SCORE
-15010 COLOR 0,7
-15020 LOCATE 25,1
+15000 REM ROOM DESCRIPTION
+15010 COLOR 0, 0: CLS: COLOR 0,7
+15020 LOCATE SCREEN_TOP,1
 15030 PRINT "                                                                               "
-15040 LOCATE 25,3:PRINT RO$(RO)
-15050 LOCATE 25,50:PRINT "Score:";SCORE
+15040 LOCATE SCREEN_TOP,3:PRINT RO$(RO)
+15050 LOCATE SCREEN_TOP,50:PRINT "Score:";SCORE
 15060 COLOR 7,0
 15065 PRINT RO$(RO)
 15066 IF RO>39 THEN 15090
