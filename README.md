@@ -33,6 +33,9 @@ Pirate Island adapted from David Meny original at https://unbox.ifarchive.org/?u
 | RESTORE | `RESTORE [linenum]` | Reset the DATA pointer |
 | DIM | `DIM var(n) [, var(m, p)]` | Dimension arrays (subscripts are 0-based) |
 | ERASE | `ERASE var [, var ...]` | Remove arrays so they can be re-dimensioned |
+| LOCATE | `LOCATE [row][,[col][,[cursor][,[start][,stop]]]]` | Position cursor on screen |
+| CLS | `CLS [n]` | Clear the screen |
+| COLOR | `COLOR [fg][,[bg][,border]]` | Set text foreground/background colors |
 | REM | `REM text` or `' text` | Comment (ignored by interpreter) |
 | END | `END` | Terminate the program |
 

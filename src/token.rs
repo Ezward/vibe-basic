@@ -37,6 +37,9 @@ pub enum Token {
     On,
     Gosub,
     Return,
+    Locate,
+    Cls,
+    Color,
     // Logical operators
     And,
     Or,
@@ -191,6 +194,9 @@ impl Lexer {
             "ON" => Token::On,
             "GOSUB" => Token::Gosub,
             "RETURN" => Token::Return,
+            "LOCATE" => Token::Locate,
+            "CLS" => Token::Cls,
+            "COLOR" => Token::Color,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
@@ -722,6 +728,62 @@ mod tests {
                 Token::Number(20.0),
                 Token::Comma,
                 Token::StringLiteral("HELLO".to_string()),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_locate_keyword() {
+        let tokens = Lexer::new("LOCATE").tokenize();
+        assert_eq!(tokens, vec![Token::Locate, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_cls_keyword() {
+        let tokens = Lexer::new("CLS").tokenize();
+        assert_eq!(tokens, vec![Token::Cls, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_color_keyword() {
+        let tokens = Lexer::new("COLOR").tokenize();
+        assert_eq!(tokens, vec![Token::Color, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_locate_cls_color_case_insensitive() {
+        let tokens = Lexer::new("locate cls color").tokenize();
+        assert_eq!(tokens, vec![Token::Locate, Token::Cls, Token::Color, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_locate_statement() {
+        let tokens = Lexer::new("LOCATE 1, 1").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Locate,
+                Token::Number(1.0),
+                Token::Comma,
+                Token::Number(1.0),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_color_statement() {
+        let tokens = Lexer::new("COLOR 7, 0, 0").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Color,
+                Token::Number(7.0),
+                Token::Comma,
+                Token::Number(0.0),
+                Token::Comma,
+                Token::Number(0.0),
                 Token::Eof,
             ]
         );

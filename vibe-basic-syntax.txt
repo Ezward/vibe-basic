@@ -15,7 +15,8 @@ line_number     = digit { digit } ;
 statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt |
                   for_stmt | next_stmt | gosub_stmt | on_gosub_stmt |
                   return_stmt | def_fn_stmt | data_stmt | read_stmt |
-                  restore_stmt | dim_stmt | erase_stmt | remark | end_stmt ;
+                  restore_stmt | dim_stmt | erase_stmt | locate_stmt |
+                  cls_stmt | color_stmt | remark | end_stmt ;
 
 let_stmt        = [ "LET" ] variable [ "(" expression { "," expression } ")" ]
                   "=" expression ;
@@ -39,6 +40,10 @@ restore_stmt    = "RESTORE" [ line_number ] ;
 dim_stmt        = "DIM" array_decl { "," array_decl } ;
 array_decl      = variable "(" expression { "," expression } ")" ;
 erase_stmt      = "ERASE" variable { "," variable } ;
+locate_stmt     = "LOCATE" [ expression ] [ "," [ expression ] [ "," [ expression ]
+                  [ "," [ expression ] [ "," expression ] ] ] ] ;
+cls_stmt        = "CLS" [ expression ] ;
+color_stmt      = "COLOR" [ expression ] [ "," [ expression ] [ "," expression ] ] ;
 remark          = ( "REM" | "'" ) { character } ;
 end_stmt        = "END" ;
 
@@ -170,7 +175,44 @@ II. SEMANTIC EXPLANATIONS
     stored values; after re-dimensioning, all elements are initialized to zero.
     Example: ERASE A, B
 
-13. Expressions
+13. LOCATE (Cursor Positioning)
+    Action: Moves the cursor to the specified row and column on the text screen.
+    All parameters are optional; omitted parameters retain their previous values.
+    Uses ANSI escape codes for terminal cursor control.
+    - row: screen line number (1-25)
+    - col: screen column number (1-80)
+    - cursor: Boolean; 0 hides cursor, nonzero shows cursor
+    - start: cursor start scan line (0-31), validated but not emitted in ANSI mode
+    - stop: cursor stop scan line (0-31), validated but not emitted in ANSI mode
+    Values outside valid ranges produce "Illegal function call" errors.
+    Example: LOCATE 1, 1     — move cursor to upper-left corner
+    Example: LOCATE ,,1      — make cursor visible, position unchanged
+    Example: LOCATE 5, 10    — move cursor to row 5, column 10
+
+14. CLS (Clear Screen)
+    Action: Clears the text screen and moves cursor to upper-left corner.
+    Uses ANSI escape codes for terminal screen clearing.
+    - CLS or CLS 0: clears entire screen
+    - CLS 1: clears graphics viewport (in text mode, clears screen)
+    - CLS 2: clears text window
+    Other values produce "Illegal function call" errors.
+    Example: CLS             — clear the screen
+
+15. COLOR (Text Colors)
+    Action: Sets the text foreground and background colors using ANSI escape codes.
+    Only text mode (SCREEN 0) semantics are supported.
+    - foreground: integer 0-31 (0-15 normal colors, 16-31 blinking versions)
+    - background: integer 0-7
+    - border: integer 0-15 (stored but not displayed; ANSI terminals have no border)
+    The 16 base colors are: 0=Black, 1=Blue, 2=Green, 3=Cyan, 4=Red, 5=Magenta,
+    6=Brown/Yellow, 7=White, 8=Dark Gray, 9=Light Blue, 10=Light Green, 11=Light Cyan,
+    12=Light Red, 13=Light Magenta, 14=Yellow, 15=Bright White.
+    Values outside valid ranges produce "Illegal function call" errors.
+    Example: COLOR 7, 0      — white text on black background
+    Example: COLOR 14, 1     — yellow text on blue background
+    Example: COLOR 23, 0     — blinking white text (7+16) on black
+
+16. Expressions
    Operator precedence (lowest to highest):
      - Logical OR:  OR
      - Logical XOR: XOR
@@ -190,7 +232,7 @@ II. SEMANTIC EXPLANATIONS
    The + operator performs string concatenation when both operands are strings.
    String comparison is supported with all comparison operators.
 
-14. Built-in Functions
+17. Built-in Functions
     Numeric Functions:
     - INT(x)   — Returns the floor of x (rounds toward negative infinity).
     - ABS(x)   — Returns the absolute value of x.
@@ -244,13 +286,13 @@ II. SEMANTIC EXPLANATIONS
     - CVS(x$)  — Converts a 4-byte string back to single-precision.
     - CVD(x$)  — Converts an 8-byte string back to double-precision.
 
-15. Variables
+18. Variables
     Variable names may contain letters, digits, and underscores, and must
     start with a letter. Names are case-insensitive and stored uppercase.
     An optional type sigil at the end indicates the variable type:
       $  string,  %  integer,  !  single-precision,  #  double-precision.
 
-16. Array Variables
+19. Array Variables
     Arrays store multiple values under a single variable name, accessed by one
     or more numeric subscripts. Subscripts are zero-based: the first element
     is at index 0.
@@ -294,7 +336,7 @@ II. SEMANTIC EXPLANATIONS
       Subscript values must be non-negative integers. Accessing a subscript
       beyond the declared maximum produces a "Subscript out of range" error.
 
-17. Multi-statement Lines
+20. Multi-statement Lines
     Multiple statements may appear on a single line, separated by colons (:).
 
 
