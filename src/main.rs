@@ -13,7 +13,8 @@ mod token;
 
 use std::env;
 use std::fs;
-use std::io;
+use std::io::{self, BufReader};
+use std::net::TcpListener;
 
 /// Returns the version string for the application, derived from the Cargo package version.
 fn version_string() -> String {
@@ -26,33 +27,57 @@ enum ParsedArgs {
     /// User requested `--version` output.
     Version,
     /// User wants to run a BASIC program, optionally in debug mode.
-    Run { filename: String, debug: bool },
+    Run {
+        filename: String,
+        debug: bool,
+        debug_port: Option<u16>,
+    },
 }
 
 /// Parses command-line arguments (excluding the program name) into a `ParsedArgs` value.
 /// Returns `Err` with a usage message if the arguments are invalid.
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
+    let usage = "Usage: vibe-basic [--version] [--debug [--debug-port <port>]] <filename.bas>";
     let mut debug_mode = false;
+    let mut debug_port: Option<u16> = None;
     let mut filename = None;
+    let mut i = 0;
 
-    for arg in args {
+    while i < args.len() {
+        let arg = &args[i];
         if arg == "--version" {
             return Ok(ParsedArgs::Version);
         } else if arg == "--debug" {
             debug_mode = true;
+        } else if arg == "--debug-port" {
+            i += 1;
+            if i >= args.len() {
+                return Err(format!("--debug-port requires a port number\n{}", usage));
+            }
+            debug_port = Some(
+                args[i]
+                    .parse::<u16>()
+                    .map_err(|_| format!("Invalid port number: {}\n{}", args[i], usage))?,
+            );
         } else if filename.is_none() {
             filename = Some(arg.clone());
         } else {
-            return Err("Usage: vibe-basic [--version] [--debug] <filename.bas>".to_string());
+            return Err(usage.to_string());
         }
+        i += 1;
+    }
+
+    if debug_port.is_some() && !debug_mode {
+        return Err(format!("--debug-port requires --debug\n{}", usage));
     }
 
     match filename {
         Some(f) => Ok(ParsedArgs::Run {
             filename: f,
             debug: debug_mode,
+            debug_port,
         }),
-        None => Err("Usage: vibe-basic [--version] [--debug] <filename.bas>".to_string()),
+        None => Err(usage.to_string()),
     }
 }
 
@@ -60,6 +85,9 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 /// argument, tokenizes and parses it, then executes the resulting program.
 /// With `--version`, prints the version and exits.
 /// With `--debug`, launches an interactive debugger instead.
+/// With `--debug --debug-port <port>`, the debugger listens for a TCP connection
+/// on the given port so that debug commands and output are exchanged over the
+/// network, keeping the BASIC program's stdin/stdout free from debugger traffic.
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -67,7 +95,11 @@ fn main() {
         Ok(ParsedArgs::Version) => {
             println!("{}", version_string());
         }
-        Ok(ParsedArgs::Run { filename, debug }) => {
+        Ok(ParsedArgs::Run {
+            filename,
+            debug,
+            debug_port,
+        }) => {
             let source = match fs::read_to_string(&filename) {
                 Ok(s) => s,
                 Err(e) => {
@@ -91,11 +123,47 @@ fn main() {
             let stdout = io::stdout();
 
             if debug {
-                let interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
-                let mut dbg = debugger::Debugger::new(interp);
-                if let Err(e) = dbg.run_repl(&program) {
-                    eprintln!("Debugger error: {}", e);
-                    std::process::exit(1);
+                if let Some(port) = debug_port {
+                    // Remote debug mode: listen for a TCP connection on the specified port.
+                    let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            eprintln!("Failed to bind to port {}: {}", port, e);
+                            std::process::exit(1);
+                        }
+                    };
+                    eprintln!("Debugger listening on 127.0.0.1:{}. Waiting for connection...", port);
+                    let (stream, addr) = match listener.accept() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Failed to accept connection: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+                    eprintln!("Debugger connected from {}", addr);
+                    let read_stream = match stream.try_clone() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Failed to clone TCP stream: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+                    let remote_input = Box::new(BufReader::new(read_stream));
+                    let remote_output = Box::new(stream);
+                    let interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
+                    let mut dbg = debugger::Debugger::new_remote(interp, remote_input, remote_output);
+                    if let Err(e) = dbg.run_repl(&program) {
+                        eprintln!("Debugger error: {}", e);
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Local debug mode: debugger uses stdin/stdout alongside the program.
+                    let interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
+                    let mut dbg = debugger::Debugger::new(interp);
+                    if let Err(e) = dbg.run_repl(&program) {
+                        eprintln!("Debugger error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
                 let mut interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
@@ -146,6 +214,7 @@ mod tests {
             Ok(ParsedArgs::Run {
                 filename: "hello.bas".to_string(),
                 debug: false,
+                debug_port: None,
             })
         );
     }
@@ -159,6 +228,7 @@ mod tests {
             Ok(ParsedArgs::Run {
                 filename: "hello.bas".to_string(),
                 debug: true,
+                debug_port: None,
             })
         );
     }
@@ -172,6 +242,7 @@ mod tests {
             Ok(ParsedArgs::Run {
                 filename: "hello.bas".to_string(),
                 debug: true,
+                debug_port: None,
             })
         );
     }
@@ -206,5 +277,81 @@ mod tests {
         // The version portion should contain at least one digit
         let version_part = v.strip_prefix("vibe-basic ").unwrap();
         assert!(version_part.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    /// Tests that `--debug-port` is parsed correctly with `--debug`.
+    #[test]
+    fn test_parse_args_debug_port() {
+        let args = vec![
+            "--debug".to_string(),
+            "--debug-port".to_string(),
+            "9000".to_string(),
+            "hello.bas".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args),
+            Ok(ParsedArgs::Run {
+                filename: "hello.bas".to_string(),
+                debug: true,
+                debug_port: Some(9000),
+            })
+        );
+    }
+
+    /// Tests that `--debug-port` after the filename also works.
+    #[test]
+    fn test_parse_args_debug_port_after_filename() {
+        let args = vec![
+            "hello.bas".to_string(),
+            "--debug".to_string(),
+            "--debug-port".to_string(),
+            "4567".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args),
+            Ok(ParsedArgs::Run {
+                filename: "hello.bas".to_string(),
+                debug: true,
+                debug_port: Some(4567),
+            })
+        );
+    }
+
+    /// Tests that `--debug-port` without `--debug` is an error.
+    #[test]
+    fn test_parse_args_debug_port_without_debug() {
+        let args = vec!["--debug-port".to_string(), "9000".to_string(), "hello.bas".to_string()];
+        assert!(parse_args(&args).is_err());
+    }
+
+    /// Tests that `--debug-port` without a port number is an error.
+    #[test]
+    fn test_parse_args_debug_port_missing_value() {
+        let args = vec!["--debug".to_string(), "--debug-port".to_string()];
+        assert!(parse_args(&args).is_err());
+    }
+
+    /// Tests that `--debug-port` with an invalid port is an error.
+    #[test]
+    fn test_parse_args_debug_port_invalid() {
+        let args = vec![
+            "--debug".to_string(),
+            "--debug-port".to_string(),
+            "notanumber".to_string(),
+            "hello.bas".to_string(),
+        ];
+        assert!(parse_args(&args).is_err());
+    }
+
+    /// Tests that `--debug-port` with a port exceeding u16 range is an error.
+    #[test]
+    fn test_parse_args_debug_port_out_of_range() {
+        let args = vec![
+            "--debug".to_string(),
+            "--debug-port".to_string(),
+            "99999".to_string(),
+            "hello.bas".to_string(),
+        ];
+        assert!(parse_args(&args).is_err());
     }
 }
