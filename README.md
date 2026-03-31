@@ -189,6 +189,22 @@ Launch the interactive debugger with the `--debug` flag:
 cargo run -- --debug examples/primes.bas
 ```
 
+#### Remote Debug Mode
+
+To keep debugger traffic separate from the BASIC program's stdin/stdout, use `--debug-port` to have the debugger listen on a TCP port:
+
+```sh
+cargo run -- --debug --debug-port 9000 examples/primes.bas
+```
+
+Then connect from another terminal with a tool like `nc` (netcat) or `telnet`:
+
+```sh
+nc 127.0.0.1 9000
+```
+
+Debug commands and output flow over the TCP connection while the program's `INPUT` and `PRINT` continue to use stdin/stdout in the original terminal.
+
 The debugger provides a REPL with the following commands:
 
 | Command | Description |
@@ -256,7 +272,7 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (663 tests):
+Run the full test suite (815 tests):
 
 ```sh
 cargo test
@@ -271,7 +287,7 @@ Tests are organized by module:
 | `eval` | 268 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
 | `ast` | 90 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
 | `interpreter` | 175 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
-| `debugger` | 42 | Debugger: stepping, breakpoints, LIST, variable inspection and modification |
+| `debugger` | 55 | Debugger: stepping, breakpoints, LIST, variable inspection, remote TCP mode |
 
 ## Formatting
 

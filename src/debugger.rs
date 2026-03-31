@@ -4,6 +4,10 @@
 //! adds interactive debugging capabilities: stepping through lines, setting
 //! breakpoints (by line number or conditional expression), inspecting and
 //! modifying variables, and controlling execution flow.
+//!
+//! The debugger supports an optional remote mode where debug commands and output
+//! are exchanged over a TCP connection, keeping the BASIC program's stdin/stdout
+//! free from debugger traffic.
 
 use crate::ast::{Parser, PrintItem, Program, Statement};
 use crate::expr::{Expr, ExprParser};
@@ -41,8 +45,14 @@ enum ExecutionOutcome {
 
 /// Interactive debugger that wraps an interpreter and provides step-by-step
 /// execution, breakpoints, and variable inspection.
+///
+/// When remote I/O is configured, debugger commands are read from and responses
+/// written to the remote streams, while the BASIC program continues to use the
+/// interpreter's own stdin/stdout for `INPUT` and `PRINT`.
 pub struct Debugger<R: BufRead, W: Write> {
     interpreter: Interpreter<R, W>,
+    remote_input: Option<Box<dyn BufRead>>,
+    remote_output: Option<Box<dyn Write>>,
     breakpoints: Vec<Breakpoint>,
     line_idx: usize,
     start_stmt_idx: usize,
@@ -51,9 +61,12 @@ pub struct Debugger<R: BufRead, W: Write> {
 
 impl<R: BufRead, W: Write> Debugger<R, W> {
     /// Creates a new debugger wrapping the given interpreter.
+    /// Debug commands and output use the interpreter's own I/O streams.
     pub fn new(interpreter: Interpreter<R, W>) -> Self {
         Debugger {
             interpreter,
+            remote_input: None,
+            remote_output: None,
             breakpoints: Vec::new(),
             line_idx: 0,
             start_stmt_idx: 0,
@@ -61,38 +74,67 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         }
     }
 
+    /// Creates a new debugger with remote I/O for debug commands and output.
+    /// The interpreter keeps its own streams for BASIC program I/O (`INPUT`/`PRINT`),
+    /// while the debugger REPL communicates over the provided remote streams.
+    pub fn new_remote(
+        interpreter: Interpreter<R, W>,
+        remote_input: Box<dyn BufRead>,
+        remote_output: Box<dyn Write>,
+    ) -> Self {
+        Debugger {
+            interpreter,
+            remote_input: Some(remote_input),
+            remote_output: Some(remote_output),
+            breakpoints: Vec::new(),
+            line_idx: 0,
+            start_stmt_idx: 0,
+            finished: false,
+        }
+    }
+
+    /// Reads a line of debug input from the remote stream (if configured) or the interpreter's input.
+    fn read_debug_line(&mut self, buf: &mut String) -> Result<usize, String> {
+        if let Some(ref mut input) = self.remote_input {
+            input.read_line(buf).map_err(|e| e.to_string())
+        } else {
+            self.interpreter.input.read_line(buf).map_err(|e| e.to_string())
+        }
+    }
+
+    /// Returns a mutable reference to the debug output writer.
+    fn dbg_out(&mut self) -> &mut dyn Write {
+        if let Some(ref mut output) = self.remote_output {
+            output.as_mut()
+        } else {
+            &mut self.interpreter.output
+        }
+    }
+
     /// Runs the interactive debugger REPL for the given program.
     pub fn run_repl(&mut self, program: &Program) -> Result<(), String> {
         if program.lines.is_empty() {
-            writeln!(self.interpreter.output, "Program is empty.").map_err(|e| e.to_string())?;
+            writeln!(self.dbg_out(), "Program is empty.").map_err(|e| e.to_string())?;
             return Ok(());
         }
 
         self.interpreter.collect_data(program)?;
 
-        writeln!(
-            self.interpreter.output,
-            "BASIC Debugger. Type HELP for a list of commands."
-        )
-        .map_err(|e| e.to_string())?;
+        writeln!(self.dbg_out(), "BASIC Debugger. Type HELP for a list of commands.").map_err(|e| e.to_string())?;
 
         loop {
             // Print prompt
             if self.finished {
-                write!(self.interpreter.output, "[DBG finished]> ").map_err(|e| e.to_string())?;
+                write!(self.dbg_out(), "[DBG finished]> ").map_err(|e| e.to_string())?;
             } else {
                 let line_num = program.lines[self.line_idx].line_number;
-                write!(self.interpreter.output, "[DBG line {}]> ", line_num).map_err(|e| e.to_string())?;
+                write!(self.dbg_out(), "[DBG line {}]> ", line_num).map_err(|e| e.to_string())?;
             }
-            self.interpreter.output.flush().map_err(|e| e.to_string())?;
+            self.dbg_out().flush().map_err(|e| e.to_string())?;
 
             // Read command
             let mut input_line = String::new();
-            let bytes_read = self
-                .interpreter
-                .input
-                .read_line(&mut input_line)
-                .map_err(|e| e.to_string())?;
+            let bytes_read = self.read_debug_line(&mut input_line)?;
             if bytes_read == 0 {
                 // EOF on input
                 break;
@@ -107,22 +149,16 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                 DebugCommand::Quit => break,
                 DebugCommand::Step => {
                     if self.finished {
-                        writeln!(
-                            self.interpreter.output,
-                            "Program has finished. Use GOTO to restart from a line."
-                        )
-                        .map_err(|e| e.to_string())?;
+                        writeln!(self.dbg_out(), "Program has finished. Use GOTO to restart from a line.")
+                            .map_err(|e| e.to_string())?;
                     } else {
                         self.execute_one_line(program);
                     }
                 }
                 DebugCommand::Run => {
                     if self.finished {
-                        writeln!(
-                            self.interpreter.output,
-                            "Program has finished. Use GOTO to restart from a line."
-                        )
-                        .map_err(|e| e.to_string())?;
+                        writeln!(self.dbg_out(), "Program has finished. Use GOTO to restart from a line.")
+                            .map_err(|e| e.to_string())?;
                     } else {
                         self.execute_until_break(program);
                     }
@@ -133,25 +169,30 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                         self.finished = false;
                     }
                     Err(e) => {
-                        let _ = writeln!(self.interpreter.output, "Error: {}", e);
+                        let _ = writeln!(self.dbg_out(), "Error: {}", e);
                     }
                 },
                 DebugCommand::BreakAt(line_num) => {
                     self.breakpoints.push(Breakpoint::AtLine(line_num));
-                    let _ = writeln!(self.interpreter.output, "Breakpoint set at line {}", line_num);
+                    let _ = writeln!(self.dbg_out(), "Breakpoint set at line {}", line_num);
                 }
                 DebugCommand::BreakIf(expr) => {
                     self.breakpoints.push(Breakpoint::IfExpr(expr));
-                    let _ = writeln!(self.interpreter.output, "Conditional breakpoint set");
+                    let _ = writeln!(self.dbg_out(), "Conditional breakpoint set");
                 }
                 DebugCommand::Let(stmt) => {
                     if let Err(e) = self.interpreter.execute_statement(&stmt, self.line_idx, 0, program) {
-                        let _ = writeln!(self.interpreter.output, "Error: {}", e);
+                        let _ = writeln!(self.dbg_out(), "Error: {}", e);
                     }
                 }
                 DebugCommand::Print(items) => {
-                    if let Err(e) = self.interpreter.execute_print(&items) {
-                        let _ = writeln!(self.interpreter.output, "Error: {}", e);
+                    if self.remote_output.is_some() {
+                        // In remote mode, PRINT from the debugger goes to the debug output
+                        if let Err(e) = self.execute_print_to_dbg(&items) {
+                            let _ = writeln!(self.dbg_out(), "Error: {}", e);
+                        }
+                    } else if let Err(e) = self.interpreter.execute_print(&items) {
+                        let _ = writeln!(self.dbg_out(), "Error: {}", e);
                     }
                 }
                 DebugCommand::List(start, end) => {
@@ -172,47 +213,32 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
                             .get(line.source_line - 1)
                             .map(|s| s.as_str())
                             .unwrap_or("");
-                        let _ = writeln!(self.interpreter.output, "{}", text);
+                        let _ = writeln!(self.dbg_out(), "{}", text);
                     }
                 }
                 DebugCommand::Help => {
-                    let _ = writeln!(self.interpreter.output, "Debugger commands:");
+                    let _ = writeln!(self.dbg_out(), "Debugger commands:");
                     let _ = writeln!(
-                        self.interpreter.output,
+                        self.dbg_out(),
                         "  STEP              Execute the current line and advance"
                     );
                     let _ = writeln!(
-                        self.interpreter.output,
+                        self.dbg_out(),
                         "  RUN               Run until a breakpoint or program end"
                     );
-                    let _ = writeln!(self.interpreter.output, "  LIST              List all program lines");
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "  LIST <start>      List from line <start> onward"
-                    );
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "  LIST <start> <end>  List lines from <start> to <end>"
-                    );
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "  BREAK AT <line>   Set a breakpoint at a line number"
-                    );
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "  BREAK IF <expr>   Set a conditional breakpoint"
-                    );
-                    let _ = writeln!(self.interpreter.output, "  GOTO <line>       Jump to a line number");
-                    let _ = writeln!(
-                        self.interpreter.output,
-                        "  PRINT <expr>      Evaluate and print an expression"
-                    );
-                    let _ = writeln!(self.interpreter.output, "  LET <var> = <val> Set a variable's value");
-                    let _ = writeln!(self.interpreter.output, "  QUIT              Exit the debugger");
-                    let _ = writeln!(self.interpreter.output, "  HELP              Show this help message");
+                    let _ = writeln!(self.dbg_out(), "  LIST              List all program lines");
+                    let _ = writeln!(self.dbg_out(), "  LIST <start>      List from line <start> onward");
+                    let _ = writeln!(self.dbg_out(), "  LIST <start> <end>  List lines from <start> to <end>");
+                    let _ = writeln!(self.dbg_out(), "  BREAK AT <line>   Set a breakpoint at a line number");
+                    let _ = writeln!(self.dbg_out(), "  BREAK IF <expr>   Set a conditional breakpoint");
+                    let _ = writeln!(self.dbg_out(), "  GOTO <line>       Jump to a line number");
+                    let _ = writeln!(self.dbg_out(), "  PRINT <expr>      Evaluate and print an expression");
+                    let _ = writeln!(self.dbg_out(), "  LET <var> = <val> Set a variable's value");
+                    let _ = writeln!(self.dbg_out(), "  QUIT              Exit the debugger");
+                    let _ = writeln!(self.dbg_out(), "  HELP              Show this help message");
                 }
                 DebugCommand::Unknown(s) => {
-                    let _ = writeln!(self.interpreter.output, "Unknown command: {}", s);
+                    let _ = writeln!(self.dbg_out(), "Unknown command: {}", s);
                 }
             }
         }
@@ -224,11 +250,11 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         match self.execute_one_line_inner(program) {
             ExecutionOutcome::Ok => {}
             ExecutionOutcome::Finished => {
-                let _ = writeln!(self.interpreter.output, "Program finished.");
+                let _ = writeln!(self.dbg_out(), "Program finished.");
                 self.finished = true;
             }
             ExecutionOutcome::Error(e) => {
-                let _ = writeln!(self.interpreter.output, "Runtime error: {}", e);
+                let _ = writeln!(self.dbg_out(), "Runtime error: {}", e);
                 // Don't advance line_idx so user can fix and retry
             }
         }
@@ -337,7 +363,7 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             if !first && self.line_idx < program.lines.len() {
                 let line_num = program.lines[self.line_idx].line_number;
                 if self.check_breakpoints(line_num) {
-                    let _ = writeln!(self.interpreter.output, "Breakpoint hit at line {}", line_num);
+                    let _ = writeln!(self.dbg_out(), "Breakpoint hit at line {}", line_num);
                     return;
                 }
             }
@@ -347,16 +373,51 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
             match self.execute_one_line_inner(program) {
                 ExecutionOutcome::Ok => {}
                 ExecutionOutcome::Finished => {
-                    let _ = writeln!(self.interpreter.output, "Program finished.");
+                    let _ = writeln!(self.dbg_out(), "Program finished.");
                     self.finished = true;
                     return;
                 }
                 ExecutionOutcome::Error(e) => {
-                    let _ = writeln!(self.interpreter.output, "Runtime error: {}", e);
+                    let _ = writeln!(self.dbg_out(), "Runtime error: {}", e);
                     return;
                 }
             }
         }
+    }
+
+    /// Evaluates and formats PRINT items, writing output to the debug stream instead
+    /// of the interpreter's program output. Used in remote mode so that debugger PRINT
+    /// results appear on the debug connection.
+    fn execute_print_to_dbg(&mut self, items: &[PrintItem]) -> Result<(), String> {
+        use crate::eval::Value;
+        for item in items {
+            match item {
+                PrintItem::Expression(expr) => {
+                    let val = self.interpreter.evaluator.eval_expr(expr)?;
+                    match &val {
+                        Value::Number(n) => {
+                            if *n >= 0.0 {
+                                let _ = write!(self.dbg_out(), " {} ", n);
+                            } else {
+                                let _ = write!(self.dbg_out(), "{} ", n);
+                            }
+                        }
+                        Value::String(s) => {
+                            let _ = write!(self.dbg_out(), "{}", s);
+                        }
+                    }
+                }
+                PrintItem::Semicolon => {}
+                PrintItem::Comma => {
+                    let _ = write!(self.dbg_out(), "\t");
+                }
+            }
+        }
+        // If the last item is not a separator, print newline
+        if items.is_empty() || !matches!(items.last(), Some(PrintItem::Semicolon | PrintItem::Comma)) {
+            let _ = writeln!(self.dbg_out());
+        }
+        Ok(())
     }
 
     /// Checks whether any breakpoint matches the current state.
@@ -848,5 +909,195 @@ mod tests {
         // Something with = that doesn't parse as LET (e.g. nonsensical)
         let output = run_debugger("10 END\n", "123 = 456\nQUIT\n");
         assert!(output.contains("Unknown command"));
+    }
+
+    /// Helper that creates a remote debugger where program I/O goes to `prog_output`
+    /// and debug commands/output go through separate streams.
+    fn run_remote_debugger(source: &str, commands: &str) -> (String, String) {
+        use std::sync::{Arc, Mutex};
+
+        /// A `Write` adapter backed by a shared `Vec<u8>` so it can be owned by
+        /// the `Box<dyn Write>` (which requires `'static`) while still allowing
+        /// the test to read the output afterwards.
+        #[derive(Clone)]
+        struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for SharedWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.0.lock().unwrap().flush()
+            }
+        }
+
+        let program = parse_program(source);
+        let prog_input = io::Cursor::new(Vec::new());
+        let mut prog_output: Vec<u8> = Vec::new();
+        let dbg_input = io::Cursor::new(commands.to_string().into_bytes());
+        let dbg_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let dbg_writer = SharedWriter(Arc::clone(&dbg_buf));
+        {
+            let interp = Interpreter::new(io::BufReader::new(prog_input), &mut prog_output);
+            let mut debugger =
+                Debugger::new_remote(interp, Box::new(io::BufReader::new(dbg_input)), Box::new(dbg_writer));
+            debugger.run_repl(&program).unwrap();
+        }
+        let dbg_output = dbg_buf.lock().unwrap().clone();
+        (
+            String::from_utf8(prog_output).unwrap(),
+            String::from_utf8(dbg_output).unwrap(),
+        )
+    }
+
+    /// In remote mode, debug prompts and messages go to debug output, not program output.
+    #[test]
+    fn test_remote_debugger_separation() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 PRINT \"HELLO\"\n20 END\n", "STEP\nSTEP\nQUIT\n");
+        // Program PRINT output goes to program output
+        assert!(prog_out.contains("HELLO"));
+        // Debug prompts go to debug output
+        assert!(dbg_out.contains("[DBG line 10]>"));
+        assert!(dbg_out.contains("Program finished."));
+        // Debug prompts should NOT appear in program output
+        assert!(!prog_out.contains("[DBG"));
+    }
+
+    /// In remote mode, RUN sends debug status to debug output while program output stays separate.
+    #[test]
+    fn test_remote_debugger_run_separation() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n", "RUN\nQUIT\n");
+        assert!(prog_out.contains("A"));
+        assert!(prog_out.contains("B"));
+        assert!(dbg_out.contains("Program finished."));
+        assert!(!prog_out.contains("Program finished."));
+    }
+
+    /// In remote mode, breakpoint messages go to debug output.
+    #[test]
+    fn test_remote_debugger_breakpoint() {
+        let (prog_out, dbg_out) =
+            run_remote_debugger("10 PRINT \"A\"\n20 PRINT \"B\"\n30 END\n", "BREAK AT 20\nRUN\nQUIT\n");
+        assert!(prog_out.contains("A"));
+        assert!(!prog_out.contains("Breakpoint"));
+        assert!(dbg_out.contains("Breakpoint set at line 20"));
+        assert!(dbg_out.contains("Breakpoint hit at line 20"));
+    }
+
+    /// In remote mode, PRINT from the debugger command goes to debug output.
+    #[test]
+    fn test_remote_debugger_print_goes_to_debug() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 LET X = 42\n20 END\n", "STEP\nPRINT X\nQUIT\n");
+        // Debugger PRINT should go to debug output
+        assert!(dbg_out.contains(" 42 "));
+        // Not to program output
+        assert!(!prog_out.contains("42"));
+    }
+
+    /// In remote mode, LIST goes to debug output.
+    #[test]
+    fn test_remote_debugger_list_goes_to_debug() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 PRINT \"A\"\n20 END\n", "LIST\nQUIT\n");
+        assert!(dbg_out.contains("10 PRINT \"A\""));
+        assert!(dbg_out.contains("20 END"));
+        assert!(!prog_out.contains("10 PRINT"));
+    }
+
+    /// In remote mode, HELP goes to debug output.
+    #[test]
+    fn test_remote_debugger_help_goes_to_debug() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 END\n", "HELP\nQUIT\n");
+        assert!(dbg_out.contains("Debugger commands:"));
+        assert!(!prog_out.contains("Debugger commands:"));
+    }
+
+    /// In remote mode, error messages go to debug output.
+    #[test]
+    fn test_remote_debugger_error_goes_to_debug() {
+        let (prog_out, dbg_out) = run_remote_debugger("10 PRINT 1/0\n20 END\n", "STEP\nQUIT\n");
+        assert!(dbg_out.contains("Runtime error:"));
+        assert!(!prog_out.contains("Runtime error:"));
+    }
+
+    /// In remote mode, unknown commands go to debug output.
+    #[test]
+    fn test_remote_debugger_unknown_command() {
+        let (_prog_out, dbg_out) = run_remote_debugger("10 END\n", "FOOBAR\nQUIT\n");
+        assert!(dbg_out.contains("Unknown command: FOOBAR"));
+    }
+
+    /// In remote mode, empty program message goes to debug output.
+    #[test]
+    fn test_remote_debugger_empty_program() {
+        let (prog_out, dbg_out) = run_remote_debugger("", "QUIT\n");
+        assert!(dbg_out.contains("Program is empty."));
+        assert!(!prog_out.contains("Program is empty."));
+    }
+
+    /// Remote debugger PRINT with string expression writes to debug output.
+    #[test]
+    fn test_remote_debugger_print_string() {
+        let (_prog_out, dbg_out) = run_remote_debugger("10 LET A$ = \"HELLO\"\n20 END\n", "STEP\nPRINT A$\nQUIT\n");
+        assert!(dbg_out.contains("HELLO"));
+    }
+
+    /// Remote debugger PRINT with negative number formats correctly.
+    #[test]
+    fn test_remote_debugger_print_negative() {
+        let (_prog_out, dbg_out) = run_remote_debugger("10 LET X = -7\n20 END\n", "STEP\nPRINT X\nQUIT\n");
+        assert!(dbg_out.contains("-7"));
+    }
+
+    /// Remote debugger PRINT with no items prints a blank line to debug output.
+    #[test]
+    fn test_remote_debugger_print_empty() {
+        let (_prog_out, dbg_out) = run_remote_debugger("10 END\n", "PRINT\nQUIT\n");
+        // PRINT with no args produces a newline in the debug output
+        assert!(dbg_out.contains("\n"));
+    }
+
+    /// TCP-based remote debugger integration test using a real loopback connection.
+    #[test]
+    fn test_remote_debugger_tcp() {
+        use std::io::{BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = std::thread::spawn(move || {
+            let (stream, _addr) = listener.accept().unwrap();
+            let read_stream = stream.try_clone().unwrap();
+            let program = parse_program("10 PRINT \"TCP_TEST\"\n20 END\n");
+            let prog_input = io::Cursor::new(Vec::new());
+            let mut prog_output: Vec<u8> = Vec::new();
+            {
+                let interp = Interpreter::new(io::BufReader::new(prog_input), &mut prog_output);
+                let mut debugger =
+                    Debugger::new_remote(interp, Box::new(BufReader::new(read_stream)), Box::new(stream));
+                debugger.run_repl(&program).unwrap();
+            }
+            (
+                String::from_utf8(prog_output).unwrap(),
+                // debug output went over TCP, we can't capture it here
+            )
+        });
+
+        // Connect and send debug commands
+        let mut client = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+        // Send commands
+        client.write_all(b"RUN\nQUIT\n").unwrap();
+        client.flush().unwrap();
+        // Read debug output from the TCP connection
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        std::io::Read::read_to_string(&mut client, &mut response).unwrap();
+
+        let (prog_out,) = handle.join().unwrap();
+        // Program output (PRINT) went to prog_output, not TCP
+        assert!(prog_out.contains("TCP_TEST"));
+        // Debug output went over TCP
+        assert!(response.contains("[DBG line 10]>"));
+        assert!(response.contains("Program finished."));
     }
 }
