@@ -69,6 +69,21 @@ Write an example program that tests GOSUB...RETURN and ON...GOSUB...RETURNand sa
 
 14. Update main() so that it can handle a `--version` argument to print out the version and quit.
 
+15. Please implement the LOCATE, CLS and COLOR commands for text mode (not for graphics modes).
+- LOCATE is specified in https://hwiegman.home.xs4all.nl/gw-man/LOCATE.html.  LOCATE takes a 1-based row and column argument.  The 'cursor', 'start' and 'stop' arguments are not to be implemented.
+- COLOR is specified in https://hwiegman.home.xs4all.nl/gw-man/COLOR.html.  COLOR can control the text color, the background color and the border color.  We will not be implementing control of the 'palette'.
+- CLS is specified in https://hwiegman.home.xs4all.nl/gw-man/CLS.html.  CLS responds to the last COLOR statement such filled screen uses the colors set by the most recent COLOR statement.
+- When screen commands are active, clear the rest of the line on PRINT newline so that previous text on that line is removed.
+- We only want to implement these for text mode, so ANSI terminal escape codes can be used to implement.
+
+16. Implement a remote debugger.
+- The CLI entry point is in src/main.rs.
+- The debugger is in src/debugger.rs.
+- Implement an optional argument that specifies the TCP/IP port on which the debugger will accept input and send output so the debugger can be
+operated remotely by using a program such as netcat or telnet.
+- Implement the necessary code to allow the debugger to be optionally operated remotely over a port designated by the optional argument.
+- This is so that we can do debugging without interfering with the output of the program that is running.
+
 Generally:
 
 - Use the Rust language to implement the code.
