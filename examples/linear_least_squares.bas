@@ -1,0 +1,36 @@
+10 REM =============================================
+20 REM  LINEAR LEAST SQUARES FIT:  y = m*x + c
+30 REM  EXPECTED RESULT FOR THE DATA BELOW:
+35 REM    Y = 0.9 * X + 1.3
+36 REM =============================================
+40 N = 5
+50 DATA 1, 2
+60 DATA 2, 3
+70 DATA 3, 5
+80 DATA 4, 4
+90 DATA 5, 6
+100 SX = 0
+110 SY = 0
+120 SXX = 0
+130 SXY = 0
+140 FOR I = 1 TO N
+150   READ X, Y
+160   SX = SX + X
+170   SY = SY + Y
+180   SXX = SXX + X * X
+190   SXY = SXY + X * Y
+200 NEXT I
+210 D = N * SXX - SX * SX
+220 IF D = 0 THEN PRINT "CANNOT FIT (VERTICAL LINE)" : END
+230 M = (N * SXY - SX * SY) / D
+240 C = (SY - M * SX) / N
+250 PRINT "EQUATION: Y ="; M; "* X +"; C
+260 PRINT
+270 INPUT "ENTER AN X VALUE (Q TO QUIT): ", X$
+280 IF X$ = "q" OR X$ = "Q" THEN END
+290 IF X$ = "" THEN GOTO 270
+300 XV = VAL(X$)
+310 YV = M * XV + C
+320 PRINT "PREDICTED Y ="; YV
+330 GOTO 270
+340 END
