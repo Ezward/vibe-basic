@@ -929,7 +929,7 @@ pub fn run_program_with_input(source: &str, input: &str) -> Result<String, Strin
         interp.run(&program)?;
     }
 
-    Ok(String::from_utf8(output).map_err(|e| e.to_string())?)
+    String::from_utf8(output).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

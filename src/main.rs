@@ -5,6 +5,7 @@
 //! source text -> Lexer (tokens) -> Parser (AST) -> Interpreter (execution).
 
 mod ast;
+mod builtins;
 mod debugger;
 mod eval;
 mod expr;

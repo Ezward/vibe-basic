@@ -9,8 +9,8 @@
 //! RIGHT$, MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$, STRING$, SPACE$, SPC, TAB),
 //! binary data (MKI$, MKS$, MKD$, CVI, CVS, CVD), and user-defined functions (DEF FN).
 
+use crate::builtins::{conversion, data, math, string};
 use crate::expr::{BinOp, Expr};
-use rand::Rng;
 use std::collections::HashMap;
 
 /// A user-defined function created with DEF FN.
@@ -349,397 +349,54 @@ impl Evaluator {
     }
 
     /// Applies a built-in or user-defined function to pre-evaluated argument values.
-    /// Supported built-in functions include numeric (INT, ABS, SQR, RND, EXP, LOG,
-    /// SGN, SIN, COS, TAN, ATN, FIX, CINT, CSNG, CDBL), string (LEN, LEFT$, RIGHT$,
-    /// MID$, INSTR, ASC, CHR$, STR$, VAL, HEX$, OCT$, STRING$, SPACE$, SPC, TAB),
-    /// and binary data (MKI$, MKS$, MKD$, CVI, CVS, CVD). Falls back to user-defined
-    /// functions registered via DEF FN.
+    /// Dispatches to the implementations in the `builtins` submodules (math,
+    /// string, conversion, data), then falls back to array element access and
+    /// user-defined functions registered via DEF FN.
     fn apply_function(&mut self, name: &str, args: &[Value]) -> Result<Value, String> {
         match name {
-            "INT" => {
-                if args.len() != 1 {
-                    return Err("INT expects 1 argument".to_string());
-                }
-                let val = args[0].as_number()?;
-                Ok(Value::Number(val.floor()))
-            }
-            "ABS" => {
-                if args.len() != 1 {
-                    return Err("ABS expects 1 argument".to_string());
-                }
-                let val = args[0].as_number()?;
-                Ok(Value::Number(val.abs()))
-            }
-            "SQR" => {
-                if args.len() != 1 {
-                    return Err("SQR expects 1 argument".to_string());
-                }
-                let val = args[0].as_number()?;
-                Ok(Value::Number(val.sqrt()))
-            }
-            "RND" => {
-                if args.len() != 1 {
-                    return Err("RND expects 1 argument".to_string());
-                }
-                let _arg = args[0].as_number()?;
-                // MS-BASIC RND returns a random float in [0.0, 1.0)
-                let val: f64 = self.rng.gen();
-                Ok(Value::Number(val))
-            }
-            "EXP" => {
-                if args.len() != 1 {
-                    return Err("EXP expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.exp()))
-            }
-            "LOG" => {
-                if args.len() != 1 {
-                    return Err("LOG expects 1 argument".to_string());
-                }
-                let x = args[0].as_number()?;
-                if x <= 0.0 {
-                    return Err("LOG requires a positive argument".to_string());
-                }
-                Ok(Value::Number(x.ln()))
-            }
-            "SGN" => {
-                if args.len() != 1 {
-                    return Err("SGN expects 1 argument".to_string());
-                }
-                let x = args[0].as_number()?;
-                let result = if x > 0.0 {
-                    1.0
-                } else if x < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                };
-                Ok(Value::Number(result))
-            }
-            "SIN" => {
-                if args.len() != 1 {
-                    return Err("SIN expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.sin()))
-            }
-            "COS" => {
-                if args.len() != 1 {
-                    return Err("COS expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.cos()))
-            }
-            "TAN" => {
-                if args.len() != 1 {
-                    return Err("TAN expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.tan()))
-            }
-            "ATN" => {
-                if args.len() != 1 {
-                    return Err("ATN expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.atan()))
-            }
-            "FIX" => {
-                if args.len() != 1 {
-                    return Err("FIX expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.trunc()))
-            }
-            "CINT" => {
-                if args.len() != 1 {
-                    return Err("CINT expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?.round()))
-            }
-            "CSNG" => {
-                if args.len() != 1 {
-                    return Err("CSNG expects 1 argument".to_string());
-                }
-                let x = args[0].as_number()?;
-                Ok(Value::Number((x as f32) as f64))
-            }
-            "CDBL" => {
-                if args.len() != 1 {
-                    return Err("CDBL expects 1 argument".to_string());
-                }
-                Ok(Value::Number(args[0].as_number()?))
-            }
-            "LEN" => {
-                if args.len() != 1 {
-                    return Err("LEN expects 1 argument".to_string());
-                }
-                match &args[0] {
-                    Value::String(s) => Ok(Value::Number(s.len() as f64)),
-                    _ => Err("LEN expects a string argument".to_string()),
-                }
-            }
+            // Numeric / math functions
+            "INT" => math::int(args),
+            "ABS" => math::abs(args),
+            "SQR" => math::sqr(args),
+            "RND" => math::rnd(args, &mut self.rng),
+            "EXP" => math::exp(args),
+            "LOG" => math::log(args),
+            "SGN" => math::sgn(args),
+            "SIN" => math::sin(args),
+            "COS" => math::cos(args),
+            "TAN" => math::tan(args),
+            "ATN" => math::atn(args),
+            "FIX" => math::fix(args),
+            "CINT" => math::cint(args),
+            "CSNG" => math::csng(args),
+            "CDBL" => math::cdbl(args),
 
-            // --- Substring and Search Functions ---
-            "LEFT$" => {
-                if args.len() != 2 {
-                    return Err("LEFT$ expects 2 arguments".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("LEFT$ expects a string as first argument".to_string()),
-                };
-                let n = args[1].as_number()? as usize;
-                let result: String = s.chars().take(n).collect();
-                Ok(Value::String(result))
-            }
-            "RIGHT$" => {
-                if args.len() != 2 {
-                    return Err("RIGHT$ expects 2 arguments".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("RIGHT$ expects a string as first argument".to_string()),
-                };
-                let n = args[1].as_number()? as usize;
-                let chars: Vec<char> = s.chars().collect();
-                let start = chars.len().saturating_sub(n);
-                let result: String = chars[start..].iter().collect();
-                Ok(Value::String(result))
-            }
-            "MID$" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err("MID$ expects 2 or 3 arguments".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("MID$ expects a string as first argument".to_string()),
-                };
-                let n = args[1].as_number()? as usize;
-                if n == 0 {
-                    return Err("MID$ position must be >= 1".to_string());
-                }
-                let chars: Vec<char> = s.chars().collect();
-                let start = (n - 1).min(chars.len()); // 1-based to 0-based
-                if args.len() == 3 {
-                    let m = args[2].as_number()? as usize;
-                    let end = (start + m).min(chars.len());
-                    Ok(Value::String(chars[start..end].iter().collect()))
-                } else {
-                    Ok(Value::String(chars[start..].iter().collect()))
-                }
-            }
-            "INSTR" => {
-                // INSTR([n,] x$, y$) — 2 or 3 arguments
-                if args.len() == 2 {
-                    let x = match &args[0] {
-                        Value::String(s) => s.clone(),
-                        _ => return Err("INSTR expects a string argument".to_string()),
-                    };
-                    let y = match &args[1] {
-                        Value::String(s) => s.clone(),
-                        _ => return Err("INSTR expects a string argument".to_string()),
-                    };
-                    match x.find(&y) {
-                        Some(pos) => Ok(Value::Number((pos + 1) as f64)), // 1-based
-                        None => Ok(Value::Number(0.0)),
-                    }
-                } else if args.len() == 3 {
-                    let n = args[0].as_number()? as usize;
-                    if n == 0 {
-                        return Err("INSTR start position must be >= 1".to_string());
-                    }
-                    let x = match &args[1] {
-                        Value::String(s) => s.clone(),
-                        _ => return Err("INSTR expects a string argument".to_string()),
-                    };
-                    let y = match &args[2] {
-                        Value::String(s) => s.clone(),
-                        _ => return Err("INSTR expects a string argument".to_string()),
-                    };
-                    let start = (n - 1).min(x.len());
-                    match x[start..].find(&y) {
-                        Some(pos) => Ok(Value::Number((pos + start + 1) as f64)), // 1-based
-                        None => Ok(Value::Number(0.0)),
-                    }
-                } else {
-                    Err("INSTR expects 2 or 3 arguments".to_string())
-                }
-            }
+            // String functions
+            "LEN" => string::len(args),
+            "LEFT$" => string::left(args),
+            "RIGHT$" => string::right(args),
+            "MID$" => string::mid(args),
+            "INSTR" => string::instr(args),
+            "STRING$" => string::string(args),
+            "SPACE$" => string::space(args),
+            "SPC" => string::spc(args),
+            "TAB" => string::tab(args),
 
-            // --- Conversion Functions ---
-            "ASC" => {
-                if args.len() != 1 {
-                    return Err("ASC expects 1 argument".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("ASC expects a string argument".to_string()),
-                };
-                if s.is_empty() {
-                    return Err("Illegal function call: ASC of empty string".to_string());
-                }
-                Ok(Value::Number(s.as_bytes()[0] as f64))
-            }
-            "CHR$" => {
-                if args.len() != 1 {
-                    return Err("CHR$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as u8;
-                Ok(Value::String(String::from(n as char)))
-            }
-            "STR$" => {
-                if args.len() != 1 {
-                    return Err("STR$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()?;
-                // GW-BASIC STR$ includes a leading space for positive numbers
-                let s = if n >= 0.0 {
-                    if n == (n as i64 as f64) {
-                        format!(" {}", n as i64)
-                    } else {
-                        format!(" {}", n)
-                    }
-                } else if n == (n as i64 as f64) {
-                    format!("{}", n as i64)
-                } else {
-                    format!("{}", n)
-                };
-                Ok(Value::String(s))
-            }
-            "VAL" => {
-                if args.len() != 1 {
-                    return Err("VAL expects 1 argument".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.trim().to_string(),
-                    _ => return Err("VAL expects a string argument".to_string()),
-                };
-                let n = s.parse::<f64>().unwrap_or(0.0);
-                Ok(Value::Number(n))
-            }
-            "HEX$" => {
-                if args.len() != 1 {
-                    return Err("HEX$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as i64;
-                Ok(Value::String(format!("{:X}", n)))
-            }
-            "OCT$" => {
-                if args.len() != 1 {
-                    return Err("OCT$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as i64;
-                Ok(Value::String(format!("{:o}", n)))
-            }
+            // Conversion functions
+            "ASC" => conversion::asc(args),
+            "CHR$" => conversion::chr(args),
+            "STR$" => conversion::str_(args),
+            "VAL" => conversion::val(args),
+            "HEX$" => conversion::hex(args),
+            "OCT$" => conversion::oct(args),
 
-            // --- Formatting and Creation Functions ---
-            "STRING$" => {
-                if args.len() != 2 {
-                    return Err("STRING$ expects 2 arguments".to_string());
-                }
-                let n = args[0].as_number()? as usize;
-                let ch = match &args[1] {
-                    Value::String(s) => {
-                        if s.is_empty() {
-                            return Err("Illegal function call: STRING$ with empty string".to_string());
-                        }
-                        s.chars().next().unwrap()
-                    }
-                    Value::Number(m) => *m as u8 as char,
-                };
-                Ok(Value::String(std::iter::repeat_n(ch, n).collect()))
-            }
-            "SPACE$" => {
-                if args.len() != 1 {
-                    return Err("SPACE$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as usize;
-                Ok(Value::String(" ".repeat(n)))
-            }
-            "SPC" => {
-                if args.len() != 1 {
-                    return Err("SPC expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as usize;
-                Ok(Value::String(" ".repeat(n)))
-            }
-            "TAB" => {
-                if args.len() != 1 {
-                    return Err("TAB expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as usize;
-                // TAB returns spaces to reach column n (simplified: just returns n spaces)
-                Ok(Value::String(" ".repeat(n)))
-            }
-
-            // --- Binary/Random File Data Functions ---
-            "MKI$" => {
-                if args.len() != 1 {
-                    return Err("MKI$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as i16;
-                let bytes = n.to_le_bytes();
-                Ok(Value::String(bytes.iter().map(|&b| b as char).collect()))
-            }
-            "MKS$" => {
-                if args.len() != 1 {
-                    return Err("MKS$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()? as f32;
-                let bytes = n.to_le_bytes();
-                Ok(Value::String(bytes.iter().map(|&b| b as char).collect()))
-            }
-            "MKD$" => {
-                if args.len() != 1 {
-                    return Err("MKD$ expects 1 argument".to_string());
-                }
-                let n = args[0].as_number()?;
-                let bytes = n.to_le_bytes();
-                Ok(Value::String(bytes.iter().map(|&b| b as char).collect()))
-            }
-            "CVI" => {
-                if args.len() != 1 {
-                    return Err("CVI expects 1 argument".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("CVI expects a string argument".to_string()),
-                };
-                if s.len() < 2 {
-                    return Err("CVI requires a 2-byte string".to_string());
-                }
-                let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-                let n = i16::from_le_bytes([bytes[0], bytes[1]]);
-                Ok(Value::Number(n as f64))
-            }
-            "CVS" => {
-                if args.len() != 1 {
-                    return Err("CVS expects 1 argument".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("CVS expects a string argument".to_string()),
-                };
-                if s.len() < 4 {
-                    return Err("CVS requires a 4-byte string".to_string());
-                }
-                let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-                let n = f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                Ok(Value::Number(n as f64))
-            }
-            "CVD" => {
-                if args.len() != 1 {
-                    return Err("CVD expects 1 argument".to_string());
-                }
-                let s = match &args[0] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err("CVD expects a string argument".to_string()),
-                };
-                if s.len() < 8 {
-                    return Err("CVD requires an 8-byte string".to_string());
-                }
-                let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-                let n = f64::from_le_bytes([
-                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                ]);
-                Ok(Value::Number(n))
-            }
+            // Binary / random-file data functions
+            "MKI$" => data::mki(args),
+            "MKS$" => data::mks(args),
+            "MKD$" => data::mkd(args),
+            "CVI" => data::cvi(args),
+            "CVS" => data::cvs(args),
+            "CVD" => data::cvd(args),
 
             _ => {
                 // Check for array access first
@@ -816,6 +473,9 @@ impl Evaluator {
 }
 
 #[cfg(test)]
+// 3.14 / 3.14159 appear as generic non-integer test literals, not as
+// approximations of π — silence clippy's approx_constant lint here.
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::expr::ExprParser;
@@ -1116,6 +776,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::manual_range_contains)]
     fn test_eval_rnd_in_expression() {
         // INT(RND(1) * 10) should produce an integer in [0, 9]
         for _ in 0..100 {
