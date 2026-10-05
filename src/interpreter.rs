@@ -3917,4 +3917,92 @@ mod tests {
         // Only line 20 executes (PRINT X), then STOP halts at line 30
         assert_eq!(output, " 10 \n");
     }
+
+    /// Verifies that when a FOR loop is skipped (empty range) and a second FOR
+    /// appears later on the same line, the matching-NEXT search correctly tracks
+    /// the nested depth on the same line and resumes after the outer NEXT.
+    #[test]
+    fn test_for_skip_nested_same_line() {
+        // FOR I is skipped (5..1). The same-line search sees FOR J (depth+=1),
+        // then NEXT J (depth-=1), then NEXT I (depth==0, var match).
+        let output = run_program(
+            "10 FOR I = 5 TO 1 : FOR J = 1 TO 2 : S = 0 : NEXT J : NEXT I : PRINT \"AFTER\" : END\n20 PRINT \"BAD\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "AFTER\n");
+    }
+
+    /// Verifies that when a FOR loop is skipped and a bare NEXT (no variable)
+    /// appears later on the same line, the matching-NEXT search pairs them on the
+    /// same line and resumes immediately after the NEXT.
+    #[test]
+    fn test_for_skip_bare_next_same_line() {
+        let output =
+            run_program("10 FOR I = 10 TO 1 : PRINT \"INSIDE\" : NEXT : PRINT \"DONE\" : END\n20 PRINT \"BAD\"\n")
+                .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    /// Verifies that a READ into a string variable pulls a numeric DATA value and
+    /// converts it to its string representation.
+    #[test]
+    fn test_read_number_into_string_variable() {
+        let output = run_program(
+            "\
+10 DATA 123
+20 READ S$
+30 PRINT S$
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "123\n");
+    }
+
+    /// Verifies that DIM with a negative bound produces an "Invalid dimension"
+    /// error rather than panicking or allocating a bogus size.
+    #[test]
+    fn test_dim_negative_error() {
+        let result = run_program("10 DIM A(-3)\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid dimension"));
+    }
+
+    /// Verifies that INPUT into a pre-dimensioned array element routes the entered
+    /// value through `set_array_element` (the subscripted-assignment branch).
+    #[test]
+    fn test_input_into_array_element() {
+        let output = run_program_with_input("10 DIM A(3)\n20 INPUT A(1)\n30 PRINT A(1)\n40 END\n", "99\n").unwrap();
+        assert_eq!(output, "?  99 \n");
+    }
+
+    /// Verifies that every background color 3-7 maps to a valid ANSI escape
+    /// sequence (covering the remaining background-color match arms).
+    #[test]
+    fn test_color_all_background_arms() {
+        for bg in 3..=7 {
+            let prog = format!("10 COLOR 0, {}\n20 END\n", bg);
+            let output = run_program(&prog).unwrap_or_else(|e| panic!("COLOR 0,{} failed: {}", bg, e));
+            assert!(output.starts_with("\x1b["), "COLOR 0,{} should produce ANSI escape", bg);
+        }
+    }
+
+    /// Verifies that DIM with a zero bound is accepted (array with a single slot)
+    /// and the matching NEXT search for a skipped multi-dimensional loop on later
+    /// lines resolves by variable name.
+    #[test]
+    fn test_for_skip_matching_next_subsequent_lines_by_var() {
+        // FOR I skipped on line 10; its NEXT I lives on a later line, matched by var.
+        let output = run_program(
+            "\
+10 FOR I = 5 TO 1
+20 FOR J = 1 TO 1 : S = 1 : NEXT J
+30 NEXT I
+40 PRINT \"DONE\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
 }

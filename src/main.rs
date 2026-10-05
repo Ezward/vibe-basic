@@ -88,10 +88,13 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 /// With `--debug --debug-port <port>`, the debugger listens for a TCP connection
 /// on the given port so that debug commands and output are exchanged over the
 /// network, keeping the BASIC program's stdin/stdout free from debugger traffic.
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    match parse_args(&args[1..]) {
+///
+/// All interpreter/debugger logic lives in this function so it can be tested
+/// directly (it returns `Err` with a human-readable message for every
+/// failure instead of calling `process::exit`); `main` is only a thin harness
+/// that calls this and exits non-zero on error.
+fn run(args: &[String]) -> Result<(), String> {
+    match parse_args(args) {
         Ok(ParsedArgs::Version) => {
             println!("{}", version_string());
         }
@@ -100,24 +103,13 @@ fn main() {
             debug,
             debug_port,
         }) => {
-            let source = match fs::read_to_string(&filename) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Error reading file '{}': {}", filename, e);
-                    std::process::exit(1);
-                }
-            };
+            let source =
+                fs::read_to_string(&filename).map_err(|e| format!("Error reading file '{}': {}", filename, e))?;
 
             let tokens = token::Lexer::new(&source).tokenize();
             let source_lines: Vec<String> = source.lines().map(String::from).collect();
             let mut parser = ast::Parser::new(&tokens, source_lines);
-            let program = match parser.parse_program() {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Parse error: {}", e);
-                    std::process::exit(1);
-                }
-            };
+            let program = parser.parse_program().map_err(|e| format!("Parse error: {}", e))?;
 
             let stdin = io::stdin();
             let stdout = io::stdout();
@@ -125,58 +117,46 @@ fn main() {
             if debug {
                 if let Some(port) = debug_port {
                     // Remote debug mode: listen for a TCP connection on the specified port.
-                    let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            eprintln!("Failed to bind to port {}: {}", port, e);
-                            std::process::exit(1);
-                        }
-                    };
+                    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+                        .map_err(|e| format!("Failed to bind to port {}: {}", port, e))?;
                     eprintln!("Debugger listening on 127.0.0.1:{}. Waiting for connection...", port);
-                    let (stream, addr) = match listener.accept() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("Failed to accept connection: {}", e);
-                            std::process::exit(1);
-                        }
-                    };
+                    let (stream, addr) = listener
+                        .accept()
+                        .map_err(|e| format!("Failed to accept connection: {}", e))?;
                     eprintln!("Debugger connected from {}", addr);
-                    let read_stream = match stream.try_clone() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("Failed to clone TCP stream: {}", e);
-                            std::process::exit(1);
-                        }
-                    };
+                    let read_stream = stream
+                        .try_clone()
+                        .map_err(|e| format!("Failed to clone TCP stream: {}", e))?;
                     let remote_input = Box::new(BufReader::new(read_stream));
                     let remote_output = Box::new(stream);
                     let interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
                     let mut dbg = debugger::Debugger::new_remote(interp, remote_input, remote_output);
-                    if let Err(e) = dbg.run_repl(&program) {
-                        eprintln!("Debugger error: {}", e);
-                        std::process::exit(1);
-                    }
+                    dbg.run_repl(&program).map_err(|e| format!("Debugger error: {}", e))?;
                 } else {
                     // Local debug mode: debugger uses stdin/stdout alongside the program.
                     let interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
                     let mut dbg = debugger::Debugger::new(interp);
-                    if let Err(e) = dbg.run_repl(&program) {
-                        eprintln!("Debugger error: {}", e);
-                        std::process::exit(1);
-                    }
+                    dbg.run_repl(&program).map_err(|e| format!("Debugger error: {}", e))?;
                 }
             } else {
                 let mut interp = interpreter::Interpreter::new(stdin.lock(), stdout.lock());
-                if let Err(e) = interp.run(&program) {
-                    eprintln!("Runtime error: {}", e);
-                    std::process::exit(1);
-                }
+                interp.run(&program).map_err(|e| format!("Runtime error: {}", e))?;
             }
         }
         Err(msg) => {
-            eprintln!("{}", msg);
-            std::process::exit(1);
+            return Err(msg);
         }
+    }
+    Ok(())
+}
+
+/// Entry point: parse the process arguments, run the interpreter, and exit
+/// non-zero (with the error on stderr) if `run` fails.
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if let Err(msg) = run(&args[1..]) {
+        eprintln!("{}", msg);
+        std::process::exit(1);
     }
 }
 
@@ -353,5 +333,49 @@ mod tests {
             "hello.bas".to_string(),
         ];
         assert!(parse_args(&args).is_err());
+    }
+
+    /// Tests that `run` returns the parse-error usage message instead of panicking or exiting,
+    /// when the file argument is missing.
+    #[test]
+    fn test_run_no_file_returns_error() {
+        let err = run(&[]).unwrap_err();
+        assert!(err.starts_with("Usage: vibe-basic"));
+    }
+
+    /// Tests that `run` reports a file-read failure (with the file name) when the
+    /// source file does not exist.
+    #[test]
+    fn test_run_missing_file_returns_error() {
+        let missing = "definitely-not-a-real-file-1f4a9c2b.bas";
+        let err = run(&[missing.to_string()]).unwrap_err();
+        assert!(
+            err.starts_with(&format!("Error reading file '{}':", missing)),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Tests that `run` reports a parse error (with "Parse error:" prefix) when the
+    /// file exists but contains malformed BASIC.
+    #[test]
+    fn test_run_parse_error_returns_error() {
+        let path = std::env::temp_dir().join(format!("vibe-basic-badparse-{}.bas", std::process::id()));
+        std::fs::write(&path, "10 IF\n").expect("failed to write temp file");
+        let result = run(&[path.to_string_lossy().to_string()]);
+        let _ = std::fs::remove_file(&path);
+        let err = result.unwrap_err();
+        assert!(err.starts_with("Parse error:"), "unexpected error: {err}");
+    }
+
+    /// Tests that `run` reports a runtime error (with "Runtime error:" prefix) when a
+    /// well-formed program raises an error at execution time (division by zero).
+    #[test]
+    fn test_run_runtime_error_returns_error() {
+        let path = std::env::temp_dir().join(format!("vibe-basic-runtime-{}.bas", std::process::id()));
+        std::fs::write(&path, "10 LET X = 1/0\n").expect("failed to write temp file");
+        let result = run(&[path.to_string_lossy().to_string()]);
+        let _ = std::fs::remove_file(&path);
+        let err = result.unwrap_err();
+        assert!(err.starts_with("Runtime error:"), "unexpected error: {err}");
     }
 }

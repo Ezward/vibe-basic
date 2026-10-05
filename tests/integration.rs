@@ -57,6 +57,104 @@ fn integration_test_bas_file() {
     );
 }
 
+/// Writes a string to a uniquely-named temp `.bas` file (unique per test via the
+/// `name` tag, since integration tests run in parallel within one process) and
+/// returns its path.
+fn write_temp_bas(name: &str, contents: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("vibe-basic-integration-{}-{}.bas", std::process::id(), name));
+    std::fs::write(&path, contents).expect("failed to write temp .bas file");
+    path
+}
+
+/// Run the CLI against a nonexistent file: it must exit non-zero and report a
+/// file-read error on stderr (exercising main()'s error-exit harness).
+#[test]
+fn integration_missing_file_exits_nonzero() {
+    let missing = "no-such-file-for-integration-test-9f2b7a.bas";
+    let output = Command::new(binary_path())
+        .arg(missing)
+        .output()
+        .expect("failed to launch the vibe-basic binary");
+
+    assert!(
+        !output.status.success(),
+        "expected a non-zero exit for a missing file, got {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Error reading file"),
+        "expected a file-read error on stderr, got:\n{stderr}"
+    );
+}
+
+/// Run the CLI against a file with malformed BASIC: it must exit non-zero and
+/// report a parse error on stderr.
+#[test]
+fn integration_parse_error_exits_nonzero() {
+    let path = write_temp_bas("parse", "10 IF\n");
+    let output = Command::new(binary_path())
+        .arg(&path)
+        .output()
+        .expect("failed to launch the vibe-basic binary");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        !output.status.success(),
+        "expected a non-zero exit for a parse error, got {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Parse error"),
+        "expected a parse error on stderr, got:\n{stderr}"
+    );
+}
+
+/// Run the CLI against a program that raises a runtime error (division by zero):
+/// it must exit non-zero and report a runtime error on stderr.
+#[test]
+fn integration_runtime_error_exits_nonzero() {
+    let path = write_temp_bas("runtime", "10 LET X = 1/0\n");
+    let output = Command::new(binary_path())
+        .arg(&path)
+        .output()
+        .expect("failed to launch the vibe-basic binary");
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        !output.status.success(),
+        "expected a non-zero exit for a runtime error, got {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Runtime error"),
+        "expected a runtime error on stderr, got:\n{stderr}"
+    );
+}
+
+/// Run the CLI with `--version`: it must exit cleanly and print the version string
+/// (exercising the `ParsedArgs::Version` arm of `run`).
+#[test]
+fn integration_version_flag_prints_version() {
+    let output = Command::new(binary_path())
+        .arg("--version")
+        .output()
+        .expect("failed to launch the vibe-basic binary");
+
+    assert!(
+        output.status.success(),
+        "expected a clean exit for --version, got {:?}",
+        output.status
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("vibe-basic "),
+        "expected a 'vibe-basic <version>' string, got:\n{stdout}"
+    );
+}
+
 /// Run the debug-mode integration program through the real CLI in `--debug` mode,
 /// piping a script of debugger commands from disk into stdin. This exercises the
 /// `main()` debug branch and the full interactive debugger REPL (RUN/STOP break,

@@ -2069,4 +2069,76 @@ mod tests {
         assert_eq!(prog.lines[0].statements.len(), 2);
         assert!(matches!(prog.lines[0].statements[0], Statement::Cont));
     }
+
+    /// Verifies that a LET with array subscripts that is missing the closing `)`
+    /// produces the "Expected ')' after array subscripts" error.
+    #[test]
+    fn test_parse_let_array_missing_rparen() {
+        let err = parse_program_err("10 LET A(1 = 5");
+        assert!(err.contains("Expected ')' after array subscripts"));
+    }
+
+    /// Verifies that a READ targeting a multi-dimensional array element
+    /// (comma-separated subscripts) parses all indices correctly.
+    #[test]
+    fn test_parse_read_array_multi_index() {
+        let stmt = parse_single_statement("10 READ A(1, 2), B(3, 4)");
+        assert_eq!(
+            stmt,
+            Statement::Read {
+                variables: vec![
+                    ("A".to_string(), vec![Expr::Number(1.0), Expr::Number(2.0)]),
+                    ("B".to_string(), vec![Expr::Number(3.0), Expr::Number(4.0)]),
+                ],
+            }
+        );
+    }
+
+    /// Verifies that a READ with a multi-dimensional subscript list missing the
+    /// closing `)` produces the "Expected ')' after subscripts" error.
+    #[test]
+    fn test_parse_read_array_missing_rparen() {
+        let err = parse_program_err("10 READ A(1, 2");
+        assert!(err.contains("Expected ')' after subscripts"));
+    }
+
+    /// Verifies that an ON...GOSUB whose selector is followed by a comma and then
+    /// a non-number target produces the "Expected line number after comma" error.
+    #[test]
+    fn test_parse_on_gosub_error_non_numeric_target() {
+        let tokens = Lexer::new("10 ON X GOSUB 100, Y").tokenize();
+        let source_lines = vec!["10 ON X GOSUB 100, Y".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Expected line number after comma in ON...GOSUB"));
+    }
+
+    /// Verifies that LOCATE stops parsing its parameter list when a non-comma
+    /// token follows the first parameter; the trailing token then surfaces as an
+    /// "Unexpected token" error from the statement loop.
+    #[test]
+    fn test_parse_locate_trailing_non_comma() {
+        let tokens = Lexer::new("10 LOCATE 10 20").tokenize();
+        let source_lines = vec!["10 LOCATE 10 20".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected token"));
+    }
+
+    /// Verifies that COLOR stops parsing its parameter list when a non-comma
+    /// token follows the first parameter; the trailing token then surfaces as an
+    /// "Unexpected token" error from the statement loop.
+    #[test]
+    fn test_parse_color_trailing_non_comma() {
+        let tokens = Lexer::new("10 COLOR 7 2").tokenize();
+        let source_lines = vec!["10 COLOR 7 2".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected token"));
+    }
 }

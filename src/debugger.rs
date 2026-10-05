@@ -127,8 +127,10 @@ impl<R: BufRead, W: Write> Debugger<R, W> {
         writeln!(self.dbg_out(), "BASIC Debugger. Type HELP for a list of commands.").map_err(|e| e.to_string())?;
 
         loop {
-            // Print prompt
-            if self.finished {
+            // Print prompt. When execution has stopped at (or moved past) the end of
+            // the program without END — e.g. a STOP that is the final statement —
+            // `line_idx` may be past the last line, so guard the index.
+            if self.finished || self.line_idx >= program.lines.len() {
                 write!(self.dbg_out(), "[DBG finished]> ").map_err(|e| e.to_string())?;
             } else {
                 let line_num = program.lines[self.line_idx].line_number;
@@ -1259,6 +1261,16 @@ mod tests {
     }
 
     #[test]
+    fn test_debugger_step_after_final_stop_does_not_panic() {
+        // When STOP is the final statement, line_idx advances past the last line while
+        // finished stays false. STEP/RUN at that point must not panic reading the prompt
+        // and must report the program as finished.
+        let output = run_debugger("10 LET X = 5\n20 STOP\n", "RUN\nSTEP\nRUN\nQUIT\n");
+        assert!(output.contains("Break in line 20"));
+        assert!(output.contains("Program finished."));
+    }
+
+    #[test]
     fn test_debugger_help_shows_cont() {
         let output = run_debugger("10 END\n", "HELP\nQUIT\n");
         assert!(output.contains("CONT"));
@@ -1276,5 +1288,96 @@ mod tests {
         // Debug output should have the break message
         assert!(dbg_out.contains("Break in line 20"));
         assert!(dbg_out.contains("Program finished."));
+    }
+
+    /// Remote-mode PRINT of an expression that errors surfaces the runtime error to debug output.
+    #[test]
+    fn test_remote_debugger_print_error() {
+        let (_prog_out, dbg_out) = run_remote_debugger("10 END\n", "PRINT 1/0\nQUIT\n");
+        assert!(dbg_out.contains("Error:"));
+    }
+
+    /// Stepping from a position past the end of the program terminates cleanly.
+    #[test]
+    fn test_debugger_step_at_end_of_program() {
+        let output = run_debugger("10 END\n", "RUN\nSTEP\nQUIT\n");
+        // After RUN finishes the program, STEP past the end should not crash.
+        assert!(!output.is_empty());
+    }
+
+    /// GOSUB whose line has a following statement returns to that next statement on the same line.
+    #[test]
+    fn test_debugger_gosub_same_line_return() {
+        // GOSUB is mid-line, so the return address is the next statement on the same line.
+        let output = run_debugger(
+            "10 GOSUB 100 : PRINT \"BACK\"\n20 END\n100 PRINT \"SUB\"\n110 RETURN\n",
+            "RUN\nQUIT\n",
+        );
+        // SUB prints first (from GOSUB), then BACK prints (the statement after GOSUB on line 10).
+        assert!(output.contains("SUB"));
+        assert!(output.contains("BACK"));
+    }
+
+    /// GOSUB to a nonexistent line yields a runtime error during a stepped execution.
+    #[test]
+    fn test_debugger_gosub_bad_target() {
+        let output = run_debugger("10 GOSUB 999\n20 END\n", "STEP\nQUIT\n");
+        assert!(output.contains("Runtime error:"));
+    }
+
+    /// RETURN with an explicit line number jumps to that line rather than the GOSUB return address.
+    #[test]
+    fn test_debugger_return_explicit_line() {
+        // GOSUB pushes a return address, but RETURN 30 overrides it and jumps to line 30.
+        let output = run_debugger(
+            "10 GOSUB 100\n20 PRINT \"SHOULD NOT PRINT\"\n30 PRINT \"JUMPED\"\n40 END\n100 RETURN 30\n",
+            "RUN\nQUIT\n",
+        );
+        assert!(output.contains("JUMPED"));
+        assert!(!output.contains("SHOULD NOT PRINT"));
+    }
+
+    /// STOP followed by more statements on the same line resumes at the next statement on that line.
+    #[test]
+    fn test_debugger_stop_same_line_resume() {
+        // STOP is mid-line; after CONT the next statement on the same line runs.
+        let output = run_debugger("10 STOP : PRINT \"AFTER STOP\"\n20 END\n", "RUN\nCONT\nQUIT\n");
+        assert!(output.contains("Break in line 10"));
+        assert!(output.contains("AFTER STOP"));
+    }
+
+    /// Remote-mode PRINT whose items include a semicolon prints the values without a separator.
+    #[test]
+    fn test_remote_debugger_print_semicolon_item() {
+        // In remote mode the debugger's PRINT goes through execute_print_to_dbg,
+        // where a Semicolon item prints nothing, so the values run together.
+        let (_prog_out, dbg_out) = run_remote_debugger("10 END\n", "PRINT \"AB\";\"CD\"\nQUIT\n");
+        assert!(dbg_out.contains("ABCD"));
+    }
+
+    /// Remote-mode PRINT whose items include a comma inserts a tab separator.
+    #[test]
+    fn test_remote_debugger_print_comma_item() {
+        // In remote mode the Comma item prints a tab between the two numbers.
+        let (_prog_out, dbg_out) = run_remote_debugger("10 END\n", "PRINT 1,2\nQUIT\n");
+        assert!(dbg_out.contains("1 \t 2"));
+    }
+
+    /// A LET debug command that fails to parse as a BASIC statement is reported as unknown.
+    #[test]
+    fn test_debugger_let_bad_statement_falls_to_unknown() {
+        // "LET X" has no assignment, so the fake line fails to parse as a Let
+        // statement and the command is treated as unknown.
+        let output = run_debugger("10 END\n", "LET X\nQUIT\n");
+        assert!(output.contains("Unknown command"));
+    }
+
+    /// RETURN with an explicit line number that does not exist yields a runtime error.
+    #[test]
+    fn test_debugger_return_explicit_bad_line() {
+        // GOSUB pushes a return address, then RETURN 999 tries to jump to a
+        // nonexistent line, which is a runtime error.
+        let output = run_debugger("10 GOSUB 100\n100 RETURN 999\n", "RUN\nQUIT\n");
+        assert!(output.contains("Runtime error:"));
     }
 }
