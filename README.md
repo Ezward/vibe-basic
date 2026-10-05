@@ -106,6 +106,8 @@ src/
 ├── ast.rs           — Statement/program parser: parses tokens into an AST
 ├── interpreter.rs   — Interpreter: executes BASIC programs with full control flow
 └── debugger.rs      — Debugger: interactive step-through debugging REPL
+tests/
+└── integration.rs   — Runs the example .bas files via the CLI (non-debug and --debug modes)
 scripts/
 ├── setup-cross-compile.sh — Install cross-compilation toolchains and configure Cargo
 └── build.sh                — Build release binaries for native and/or cross-compile targets
@@ -248,6 +250,9 @@ Several example programs are included in the `examples/` directory:
 | `math.bas` | Math functions demonstration |
 | `powers.bas` | Powers calculation |
 | `strings.bas` | String function demonstration |
+| `integration-test.bas` | Exercises the full pipeline; ends in STOP (run by the integration test) |
+| `integration-debug.bas` | Debug-mode integration program, driven by `integration-debug.cmds` |
+| `integration-remote-debug.bas` | Remote-debug integration program (driven over a TCP connection) |
 
 ### Example Program
 
@@ -275,11 +280,31 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (841 tests):
+Run the full test suite (841 unit tests plus 3 integration tests):
 
 ```sh
 cargo test
 ```
+
+The integration tests in [`tests/integration.rs`](tests/integration.rs) load
+example files from disk and run them through the real compiled CLI:
+
+- **Non-debug** — runs
+  [`examples/integration-test.bas`](examples/integration-test.bas) end-to-end
+  (file-read → lex → parse → interpret). The program ends with a `STOP`, so the
+  test also verifies the non-debug STOP behavior (halts and reports
+  `Break in line N` on stderr).
+- **Debug mode** — runs
+  [`examples/integration-debug.bas`](examples/integration-debug.bas) with
+  `--debug`, piping the debugger command script
+  [`examples/integration-debug.cmds`](examples/integration-debug.cmds) into stdin.
+  This exercises the interactive debugger REPL (RUN/STOP break, PRINT/LET
+  inspection, GOTO) through the real `main()` debug branch.
+- **Remote debug mode** — runs
+  [`examples/integration-remote-debug.bas`](examples/integration-remote-debug.bas)
+  with `--debug --debug-port <port>`, connecting a real TCP client to the
+  listener the binary spawns. This verifies that the debugger REPL flows over
+  the TCP connection while the program's own `PRINT` stays on stdout.
 
 Tests are organized by module:
 
@@ -293,7 +318,7 @@ Tests are organized by module:
 | `debugger` | 65 | Debugger: stepping, breakpoints, STOP/CONT, LIST, variable inspection, remote TCP mode |
 | `main` | 16 | CLI: argument parsing, version string |
 
-Totals 841 tests.
+841 unit tests total (plus 3 integration tests in `tests/integration.rs`).
 
 ## Formatting
 
