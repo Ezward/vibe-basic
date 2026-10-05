@@ -469,6 +469,17 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     Ok(StmtResult::Gosub(line_num))
                 }
             }
+            Statement::OnGoto { selector, targets } => {
+                let val = self.evaluator.eval_expr(selector)?;
+                let index = val.as_number()? as i64;
+                if index < 1 || index as usize > targets.len() {
+                    // Out of range: continue to next statement (GW-BASIC behavior)
+                    Ok(StmtResult::Continue)
+                } else {
+                    let line_num = targets[(index - 1) as usize];
+                    Ok(StmtResult::Goto(line_num))
+                }
+            }
             Statement::Return { target } => {
                 if self.gosub_stack.is_empty() {
                     return Err("RETURN without GOSUB".to_string());
@@ -3108,6 +3119,169 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "ONLY\n");
+    }
+
+    #[test]
+    fn test_on_goto_first_target() {
+        let output = run_program(
+            "\
+10 ON 1 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "FIRST\n");
+    }
+
+    #[test]
+    fn test_on_goto_second_target() {
+        let output = run_program(
+            "\
+10 ON 2 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_goto_third_target() {
+        let output = run_program(
+            "\
+10 ON 3 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "THIRD\n");
+    }
+
+    #[test]
+    fn test_on_goto_out_of_range_zero() {
+        let output = run_program(
+            "\
+10 ON 0 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_out_of_range_high() {
+        let output = run_program(
+            "\
+10 ON 5 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_negative_index() {
+        let output = run_program(
+            "\
+10 ON -1 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_expression_selector() {
+        let output = run_program(
+            "\
+10 X = 1
+20 ON X + 1 GOTO 100, 200, 300
+40 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_goto_single_target() {
+        let output = run_program(
+            "\
+10 ON 1 GOTO 100
+20 END
+100 PRINT \"ONLY\"
+110 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ONLY\n");
+    }
+
+    #[test]
+    fn test_on_goto_in_loop() {
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 3
+20   ON I GOTO 100, 200, 300
+40   PRINT \"BAD\"
+50 NEXT I
+60 PRINT \"DONE\"
+70 END
+100 PRINT \"A\";
+110 GOTO 50
+200 PRINT \"B\";
+210 GOTO 50
+300 PRINT \"C\"
+310 GOTO 50
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ABC\nDONE\n");
     }
 
     #[test]

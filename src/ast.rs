@@ -76,6 +76,10 @@ pub enum Statement {
         selector: Expr,
         targets: Vec<u32>,
     },
+    OnGoto {
+        selector: Expr,
+        targets: Vec<u32>,
+    },
     Return {
         target: Option<Expr>,
     },
@@ -335,7 +339,7 @@ impl<'a> Parser<'a> {
             }
             Token::On => {
                 self.advance();
-                self.parse_on_gosub()
+                self.parse_on_target()
             }
             Token::Gosub => {
                 self.advance();
@@ -736,21 +740,24 @@ impl<'a> Parser<'a> {
         Ok(Statement::Restore { line_number })
     }
 
-    /// Parses an `ON expr GOSUB line1, line2, ...` statement.
-    /// The selector expression is evaluated at runtime to choose which target line to GOSUB to.
-    /// Targets are 1-indexed: ON 1 GOSUB 100,200 calls line 100, ON 2 calls line 200.
-    fn parse_on_gosub(&mut self) -> Result<Statement, String> {
+    /// Parses an `ON expr GOSUB line1, line2, ...` or `ON expr GOTO line1, line2, ...` statement.
+    /// The selector expression is evaluated at runtime to choose which target line to jump to.
+    /// Targets are 1-indexed: ON 1 GOTO 100,200 jumps to line 100, ON 2 jumps to line 200.
+    fn parse_on_target(&mut self) -> Result<Statement, String> {
         let selector = self.parse_expression()?;
-        if *self.peek() != Token::Gosub {
-            return Err(self.error_with_context("Expected GOSUB after ON expression".to_string()));
+        let is_gosub = *self.peek() == Token::Gosub;
+        let is_goto = *self.peek() == Token::Goto;
+        if !is_gosub && !is_goto {
+            return Err(self.error_with_context("Expected GOTO or GOSUB after ON expression".to_string()));
         }
-        self.advance(); // consume GOSUB
+        self.advance(); // consume GOTO or GOSUB
+        let target_desc = if is_gosub { "ON...GOSUB" } else { "ON...GOTO" };
         let mut targets = Vec::new();
         if let Token::Number(n) = self.peek().clone() {
             self.advance();
             targets.push(n as u32);
         } else {
-            return Err(self.error_with_context("Expected line number after ON...GOSUB".to_string()));
+            return Err(self.error_with_context(format!("Expected line number after {}", target_desc)));
         }
         while *self.peek() == Token::Comma {
             self.advance();
@@ -758,10 +765,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 targets.push(n as u32);
             } else {
-                return Err(self.error_with_context("Expected line number after comma in ON...GOSUB".to_string()));
+                return Err(self.error_with_context(format!("Expected line number after comma in {}", target_desc)));
             }
         }
-        Ok(Statement::OnGosub { selector, targets })
+        if is_gosub {
+            Ok(Statement::OnGosub { selector, targets })
+        } else {
+            Ok(Statement::OnGoto { selector, targets })
+        }
     }
 
     /// Parses a LOCATE statement: `LOCATE [row][,[col][,[cursor][,[start][,stop]]]]`.
@@ -1879,7 +1890,7 @@ mod tests {
         let mut parser = Parser::new(&tokens, source_lines);
         let result = parser.parse_program();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Expected GOSUB"));
+        assert!(result.unwrap_err().contains("Expected GOTO or GOSUB"));
     }
 
     #[test]
@@ -1906,6 +1917,51 @@ mod tests {
         );
         assert_eq!(prog.lines.len(), 6);
         assert!(matches!(prog.lines[0].statements[0], Statement::OnGosub { .. }));
+    }
+
+    #[test]
+    fn test_parse_on_goto_basic() {
+        let stmt = parse_single_statement("10 ON X GOTO 100, 200, 300");
+        match stmt {
+            Statement::OnGoto { selector, targets } => {
+                assert!(matches!(selector, Expr::Variable(_)));
+                assert_eq!(targets, vec![100, 200, 300]);
+            }
+            _ => panic!("Expected OnGoto, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_single_target() {
+        let stmt = parse_single_statement("10 ON I GOTO 500");
+        match stmt {
+            Statement::OnGoto { targets, .. } => {
+                assert_eq!(targets, vec![500]);
+            }
+            _ => panic!("Expected OnGoto"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_expression_selector() {
+        let stmt = parse_single_statement("10 ON A + 1 GOTO 100, 200");
+        match stmt {
+            Statement::OnGoto { selector, targets } => {
+                assert!(matches!(selector, Expr::BinaryOp { .. }));
+                assert_eq!(targets, vec![100, 200]);
+            }
+            _ => panic!("Expected OnGoto"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_error_missing_keyword() {
+        let tokens = Lexer::new("10 ON X 100, 200").tokenize();
+        let source_lines = vec!["10 ON X 100, 200".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected GOTO or GOSUB"));
     }
 
     #[test]
