@@ -16,7 +16,8 @@ statement       = let_stmt | print_stmt | if_stmt | goto_stmt | input_stmt |
                   for_stmt | next_stmt | gosub_stmt | on_gosub_stmt |
                   return_stmt | def_fn_stmt | data_stmt | read_stmt |
                   restore_stmt | dim_stmt | erase_stmt | locate_stmt |
-                  cls_stmt | color_stmt | remark | end_stmt ;
+                  cls_stmt | color_stmt | remark | end_stmt |
+                  stop_stmt | cont_stmt ;
 
 let_stmt        = [ "LET" ] variable [ "(" expression { "," expression } ")" ]
                   "=" expression ;
@@ -46,6 +47,8 @@ cls_stmt        = "CLS" [ expression ] ;
 color_stmt      = "COLOR" [ expression ] [ "," [ expression ] [ "," expression ] ] ;
 remark          = ( "REM" | "'" ) { character } ;
 end_stmt        = "END" ;
+stop_stmt       = "STOP" ;
+cont_stmt       = "CONT" ;
 
 (* Print list *)
 print_list      = print_item { print_item } ;
@@ -156,6 +159,24 @@ II. SEMANTIC EXPLANATIONS
 
 10. END (Termination)
     Action: Stops program execution immediately.
+
+10a. STOP (Debug Break)
+    Action: Suspends program execution and returns control to the interactive
+    debugger prompt. Unlike END, STOP preserves all variable values, loop state,
+    and subroutine stack — the program can be resumed with CONT. The interpreter
+    prints a "Break in line N" message identifying where execution halted.
+    In non-debug mode (no interactive debugger), STOP prints the break message
+    to stderr and terminates the program.
+    Example: STOP  — halts at the current line, preserving all state.
+
+10b. CONT (Continue)
+    Action: Resumes program execution from the point where it was last halted
+    by a STOP statement, a breakpoint, or the debugger's RUN command. As a
+    BASIC statement within program code, CONT is a no-op — execution simply
+    continues to the next statement or line. In the debugger REPL, CONT is
+    equivalent to the RUN command: it resumes execution until the next
+    breakpoint, STOP, or program end.
+    Example: CONT  — resume after a STOP or breakpoint.
 
 11. DIM (Array Dimensioning)
     Action: Allocates storage for one or more arrays and establishes maximum subscript

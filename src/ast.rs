@@ -94,6 +94,10 @@ pub enum Statement {
         background: Option<Expr>,
         border: Option<Expr>,
     },
+    /// STOP — suspend execution and return control to the debugger prompt
+    Stop,
+    /// CONT — resume execution from where the program was halted
+    Cont,
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -355,6 +359,14 @@ impl<'a> Parser<'a> {
             Token::Color => {
                 self.advance();
                 self.parse_color()
+            }
+            Token::Stop => {
+                self.advance();
+                Ok(Statement::Stop)
+            }
+            Token::Cont => {
+                self.advance();
+                Ok(Statement::Cont)
             }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
@@ -2018,5 +2030,43 @@ mod tests {
                 border: None,
             }
         );
+    }
+
+    #[test]
+    fn test_parse_stop() {
+        let stmt = parse_single_statement("10 STOP");
+        assert_eq!(stmt, Statement::Stop);
+    }
+
+    #[test]
+    fn test_parse_cont() {
+        let stmt = parse_single_statement("10 CONT");
+        assert_eq!(stmt, Statement::Cont);
+    }
+
+    #[test]
+    fn test_parse_stop_case_insensitive() {
+        let stmt = parse_single_statement("10 stop");
+        assert_eq!(stmt, Statement::Stop);
+    }
+
+    #[test]
+    fn test_parse_cont_case_insensitive() {
+        let stmt = parse_single_statement("10 cont");
+        assert_eq!(stmt, Statement::Cont);
+    }
+
+    #[test]
+    fn test_parse_stop_on_multi_statement_line() {
+        let prog = parse_program("10 PRINT \"HI\" : STOP");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[1], Statement::Stop));
+    }
+
+    #[test]
+    fn test_parse_cont_on_multi_statement_line() {
+        let prog = parse_program("10 CONT : PRINT \"HI\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Cont));
     }
 }

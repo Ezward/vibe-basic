@@ -40,6 +40,8 @@ pub enum Token {
     Locate,
     Cls,
     Color,
+    Stop,
+    Cont,
     // Logical operators
     And,
     Or,
@@ -197,6 +199,8 @@ impl Lexer {
             "LOCATE" => Token::Locate,
             "CLS" => Token::Cls,
             "COLOR" => Token::Color,
+            "STOP" => Token::Stop,
+            "CONT" => Token::Cont,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
@@ -784,6 +788,56 @@ mod tests {
                 Token::Number(0.0),
                 Token::Comma,
                 Token::Number(0.0),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_stop_keyword() {
+        let tokens = Lexer::new("STOP").tokenize();
+        assert_eq!(tokens, vec![Token::Stop, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_cont_keyword() {
+        let tokens = Lexer::new("CONT").tokenize();
+        assert_eq!(tokens, vec![Token::Cont, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_stop_cont_case_insensitive() {
+        let tokens = Lexer::new("stop cont").tokenize();
+        assert_eq!(tokens, vec![Token::Stop, Token::Cont, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_stop_statement() {
+        let tokens = Lexer::new("10 STOP\n20 END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Stop,
+                Token::Newline,
+                Token::Number(20.0),
+                Token::End,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_cont_statement() {
+        let tokens = Lexer::new("10 CONT\n20 END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Cont,
+                Token::Newline,
+                Token::Number(20.0),
+                Token::End,
                 Token::Eof,
             ]
         );

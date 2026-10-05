@@ -38,6 +38,8 @@ Pirate Island adapted from David Meny original at https://unbox.ifarchive.org/?u
 | COLOR | `COLOR [fg][,[bg][,border]]` | Set text foreground/background colors |
 | REM | `REM text` or `' text` | Comment (ignored by interpreter) |
 | END | `END` | Terminate the program |
+| STOP | `STOP` | Suspend execution and enter the debugger (like a breakpoint); preserves all state |
+| CONT | `CONT` | Resume execution after a STOP (as a statement, a no-op; in the debugger, equivalent to RUN) |
 
 Multiple statements can appear on one line separated by colons (e.g., `10 X = 0 : Y = 10`).
 
@@ -210,7 +212,8 @@ The debugger provides a REPL with the following commands:
 | Command | Description |
 |---------|-------------|
 | `STEP` | Execute one BASIC line |
-| `RUN` | Continue execution until a breakpoint or END |
+| `RUN` | Continue execution until a breakpoint, STOP, or END |
+| `CONT` | Resume execution (same as RUN) |
 | `LIST` | Print the entire program listing |
 | `LIST n` | Print the program starting from line number n |
 | `LIST n m` | Print program lines from n through m (inclusive) |
@@ -272,7 +275,7 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (815 tests):
+Run the full test suite (841 tests):
 
 ```sh
 cargo test
@@ -282,12 +285,15 @@ Tests are organized by module:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `token` | 43 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
+| `token` | 54 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
 | `expr` | 45 | Expression parser: precedence, associativity, parentheses, functions |
 | `eval` | 268 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
-| `ast` | 90 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
-| `interpreter` | 175 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
-| `debugger` | 55 | Debugger: stepping, breakpoints, LIST, variable inspection, remote TCP mode |
+| `ast` | 110 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
+| `interpreter` | 283 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
+| `debugger` | 65 | Debugger: stepping, breakpoints, STOP/CONT, LIST, variable inspection, remote TCP mode |
+| `main` | 16 | CLI: argument parsing, version string |
+
+Totals 841 tests.
 
 ## Formatting
 

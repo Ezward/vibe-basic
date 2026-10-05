@@ -167,6 +167,11 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                         break;
                     }
                     StmtResult::End => return Ok(()),
+                    StmtResult::Stop => {
+                        let line_num = program.lines[line_idx].line_number;
+                        eprintln!("Break in line {}", line_num);
+                        return Ok(());
+                    }
                     StmtResult::SkipLine => {
                         // IF condition was false - skip remaining statements on this line
                         break;
@@ -502,6 +507,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
+            Statement::Stop => Ok(StmtResult::Stop),
+            Statement::Cont => Ok(StmtResult::Continue),
         }
     }
 
@@ -901,6 +908,8 @@ pub(crate) enum StmtResult {
         line_index: usize,
         stmt_index: usize,
     },
+    /// STOP: suspend execution and return control to the debugger.
+    Stop,
 }
 
 /// Convenience function: parse and run a BASIC program from a string
@@ -3869,5 +3878,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "CORRECT!\n");
+    }
+
+    #[test]
+    fn test_stop_halts_program() {
+        // STOP should halt execution; lines after STOP are not executed
+        let output = run_program("10 PRINT \"BEFORE\"\n20 STOP\n30 PRINT \"AFTER\"\n40 END\n").unwrap();
+        assert_eq!(output, "BEFORE\n");
+    }
+
+    #[test]
+    fn test_stop_at_first_line() {
+        // STOP on the first line means nothing is printed
+        let output = run_program("10 STOP\n20 PRINT \"NEVER\"\n30 END\n").unwrap();
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_cont_is_noop() {
+        // CONT should be a no-op; execution continues to the next line
+        let output = run_program("10 PRINT \"A\"\n20 CONT\n30 PRINT \"B\"\n40 END\n").unwrap();
+        assert_eq!(output, "A\nB\n");
+    }
+
+    #[test]
+    fn test_cont_preserves_variables() {
+        // CONT should not affect variable values
+        let output = run_program("10 LET X = 42\n20 CONT\n30 PRINT X\n40 END\n").unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_stop_preserves_state_for_debugger() {
+        // STOP halts but the program state (variables) is preserved.
+        // We can't directly test debugger resumption here, but we can verify
+        // that STOP halts at the right point and CONT as a statement is a no-op.
+        let output = run_program("10 LET X = 10\n20 PRINT X\n30 STOP\n40 X = 20\n50 PRINT X\n60 END\n").unwrap();
+        // Only line 20 executes (PRINT X), then STOP halts at line 30
+        assert_eq!(output, " 10 \n");
     }
 }
