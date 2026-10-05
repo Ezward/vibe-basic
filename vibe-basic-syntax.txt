@@ -25,7 +25,8 @@ print_stmt      = "PRINT" [ print_list ] ;
 if_stmt         = "IF" expression "THEN" then_clause [ "ELSE" then_clause ] ;
 then_clause     = line_number | statement ;
 goto_stmt       = "GOTO" line_number ;
-input_stmt      = "INPUT" [ string_literal ( ";" | "," ) ] variable ;
+input_stmt      = "INPUT" [ string_literal ( ";" | "," ) ] variable
+                  { "," variable } ;
 for_stmt        = "FOR" variable "=" expression "TO" expression
                   [ "STEP" expression ] ;
 next_stmt       = "NEXT" [ variable ] ;
@@ -96,12 +97,17 @@ II. SEMANTIC EXPLANATIONS
 
 3. INPUT (Data Entry)
    Action: Pauses the program and displays a "? " prompt. It waits for the user
-   to type a value and press ENTER before assigning that value to the variable.
-   An optional prompt string followed by ";" or "," may precede the variable name.
-   When a semicolon is used, a "? " is automatically appended to the prompt.
-   When a comma is used, the question mark is suppressed.
+   to type values (comma-separated) and press ENTER before assigning them to the
+   variables in the order listed. One or more comma-separated variables may follow
+   the (optional) prompt. An optional prompt string followed by ";" or "," may
+   precede the first variable name. When a semicolon is used, a "? " is
+   automatically appended to the prompt. When a comma is used, the question mark
+   is suppressed.
    String variables (ending with $) receive the input as a string; numeric
    variables attempt to parse the input as a number.
+   If the user provides too few or too many values, or provides a text string for
+   a numeric variable, the interpreter prints "Redo from start" and re-prompts,
+   discarding any partially typed values (MS-BASIC behavior).
 
 4. GOTO (Branching)
    Action: Changes the Program Counter to the specified line number. This is

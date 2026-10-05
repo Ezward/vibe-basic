@@ -59,6 +59,13 @@ Write an example program that tests GOSUB...RETURN and ON...GOSUB...RETURNand sa
 
 13. The ./README.md file contains sections with instructions for compiling the application (## Building) and cross-compiling from Mac to Windows (## Cross compile from Mac to Windows) and from Mac to Linux (## Cross compile from Mac to Linux).
 
+14. Extend the INPUT statement to allow multiple variables, matching MS-BASIC/GW-BASIC behavior. Syntax: `INPUT ["prompt" (";" | ",")] var {, var}`. When the program runs, the user must type values separated by commas in the exact order the variables are listed. Key behaviors:
+   - Value Separation: The user enters data separated by commas (e.g. `25, 150, 70`).
+   - "Redo from start" Error: If the user doesn't enter enough values, enters too many values, or provides a text string for a numeric variable, the interpreter prints "Redo from start" and prompts the user to re-enter all values from the beginning.
+   - Variable Mixing: String variables and numeric variables can be mixed in a single INPUT line (e.g. `INPUT N$, A`).
+   - Strings that do not contain commas can be typed without quotation marks; a string containing a comma is split into separate values unless the user wraps it in quotation marks.
+   - Support scalar variables and array elements (e.g. `INPUT X(1), A`) in the variable list.
+
 - Create a ./scripts folder to hold bash scripts.
 - create a bash script that will complete the necessary setup steps to install the cross-compilation tools and configuration necessary to cross-compile from Mac to linux and from Mac to Windows (both x86 and Arm) and from linux to Windows (both x86 and Arm).
   - make sure the setup script is idempotent; that it will not duplicate configuration if it already exists.

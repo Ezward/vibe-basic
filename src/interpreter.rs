@@ -259,11 +259,10 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             Statement::Goto { line_number } => Ok(StmtResult::Goto(*line_number)),
             Statement::Input {
                 prompt,
-                variable,
-                indices,
+                variables,
                 suppress_question_mark,
             } => {
-                self.execute_input(prompt.as_deref(), variable, indices, *suppress_question_mark)?;
+                self.execute_input(prompt.as_deref(), variables, *suppress_question_mark)?;
                 Ok(StmtResult::Continue)
             }
             Statement::For {
@@ -586,47 +585,91 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     }
 
     /// Executes an INPUT statement: prints an optional prompt, reads a line,
-    /// and stores it as a string (for $ variables) or parses it as a number.
-    /// Supports both scalar variables and array elements.
+    /// and assigns one value to each variable. GW-BASIC matches each
+    /// comma-separated token from the user's response to a variable in order;
+    /// scalar variables and array elements are both supported.
     ///
-    /// When `suppress_question_mark` is false (semicolon separator), a "? " is appended
-    /// after any prompt. When true (comma separator), the question mark is suppressed.
+    /// When `suppress_question_mark` is false (semicolon separator), a "? " is
+    /// appended after any prompt. When true (comma separator), the question mark
+    /// is suppressed.
+    ///
+    /// If the user provides too few or too many values, or provides a text string
+    /// for a numeric variable, the interpreter prints "Redo from start" and
+    /// re-prompts, discarding any partially typed values.
     fn execute_input(
         &mut self,
         prompt: Option<&str>,
-        variable: &str,
-        indices: &[crate::expr::Expr],
+        variables: &[(String, Vec<crate::expr::Expr>)],
         suppress_question_mark: bool,
     ) -> Result<(), String> {
-        if let Some(p) = prompt {
-            write!(self.output, "{}", p).map_err(|e| e.to_string())?;
-        }
-        if !suppress_question_mark {
-            write!(self.output, "? ").map_err(|e| e.to_string())?;
-        }
-        self.output.flush().map_err(|e| e.to_string())?;
-
-        let mut line = String::new();
-        self.input.read_line(&mut line).map_err(|e| e.to_string())?;
-        let line = line.trim().to_string();
-
-        // Determine type based on variable name
-        let value = if variable.ends_with('$') {
-            Value::String(line)
-        } else if let Ok(n) = line.parse::<f64>() {
-            Value::Number(n)
-        } else {
-            Value::String(line)
+        // Build the prompt: optional string, optionally suffixed with "? ".
+        let prompt_text: String = {
+            let mut s = String::new();
+            if let Some(p) = prompt {
+                s.push_str(p);
+            }
+            if !suppress_question_mark {
+                s.push_str("? ");
+            }
+            s
         };
 
-        if indices.is_empty() {
-            self.evaluator.variables.insert(variable.to_string(), value);
-        } else {
-            let subs = self.evaluator.eval_subscripts(indices)?;
-            self.evaluator.set_array_element(variable, &subs, value)?;
+        loop {
+            write!(self.output, "{}", prompt_text).map_err(|e| e.to_string())?;
+            self.output.flush().map_err(|e| e.to_string())?;
+
+            let mut line = String::new();
+            self.input.read_line(&mut line).map_err(|e| e.to_string())?;
+            let line = line.trim();
+
+            // Split the user's response on commas into individual tokens.
+            let fields: Vec<&str> = if line.is_empty() {
+                Vec::new()
+            } else {
+                line.split(',').collect()
+            };
+
+            // MS-BASIC: if the user provides no fields or a count mismatch, the
+            // interpreter prints "Redo from start" and re-prompts, discarding the
+            // current line entirely. A blank line counts as "not enough values".
+            if fields.len() != variables.len() {
+                writeln!(self.output, "\nRedo from start").map_err(|e| e.to_string())?;
+                self.column = 0;
+                continue;
+            }
+
+            // Now assign each field to its corresponding variable.
+            let mut ok = true;
+            for ((name, indices), field) in variables.iter().zip(&fields) {
+                let field = field.trim();
+                let value = if name.ends_with('$') {
+                    Value::String(field.to_string())
+                } else if let Ok(n) = field.parse::<f64>() {
+                    Value::Number(n)
+                } else {
+                    // Non-numeric token for a numeric variable — MS-BASIC reports
+                    // this as "Redo from start".
+                    ok = false;
+                    break;
+                };
+
+                if indices.is_empty() {
+                    self.evaluator.variables.insert(name.clone(), value);
+                } else {
+                    let subs = self.evaluator.eval_subscripts(indices)?;
+                    self.evaluator.set_array_element(name, &subs, value)?;
+                }
+            }
+
+            if !ok {
+                writeln!(self.output, "\nRedo from start").map_err(|e| e.to_string())?;
+                self.column = 0;
+                continue;
+            }
+
+            self.column = 0;
+            return Ok(());
         }
-        self.column = 0;
-        Ok(())
     }
 
     /// Maps a GW-BASIC color number (0-15) to the corresponding ANSI SGR color code.
@@ -1067,6 +1110,102 @@ mod tests {
         assert_eq!(output, "VALUE 8 \n");
     }
 
+    // ===== Multi-value INPUT tests =====
+
+    #[test]
+    fn test_input_two_numeric_vars() {
+        // Verify both variables receive values by computing a derived value
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "3, 7\n").unwrap();
+        assert!(output.contains("10")); // 3+7=10
+    }
+
+    #[test]
+    fn test_input_three_vars_with_prompt() {
+        // Verify all three variables receive values
+        let output = run_program_with_input(
+            "10 INPUT \"AGE, WEIGHT, HEIGHT: \"; A, W, H\n20 PRINT A * W / H\n30 END\n",
+            "25, 150, 75\n",
+        )
+        .unwrap();
+        assert!(output.contains("AGE, WEIGHT, HEIGHT: ?"));
+        assert!(output.contains("50")); // 25*150/75=50
+    }
+
+    #[test]
+    fn test_input_mixed_string_and_numeric() {
+        // N$ is a string variable, A is numeric — mixed in one INPUT
+        let output = run_program_with_input(
+            "10 INPUT \"NAME, AGE: \"; N$, A\n20 PRINT N$; A + 1\n30 END\n",
+            "ALICE, 30\n",
+        )
+        .unwrap();
+        assert!(output.contains("ALICE"));
+        assert!(output.contains("31")); // 30+1=31
+    }
+
+    #[test]
+    fn test_input_too_few_values_redo() {
+        // Two variables, user enters one → "Redo from start", then correct input
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "5\n1, 2\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_too_many_values_redo() {
+        // Two variables, user enters three → "Redo from start", then correct input
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "1, 2, 3\n4, 5\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("9")); // 4+5=9
+    }
+
+    #[test]
+    fn test_input_non_numeric_for_numeric_in_multi() {
+        // Three vars: A (numeric), B (numeric), N$ (string).
+        // "HELLO" is non-numeric for A → redo. Then correct values.
+        let output = run_program_with_input(
+            "10 INPUT A, B, N$\n20 PRINT N$; A + B\n30 END\n",
+            "HELLO, 2, 3\n1, 2, BOB\n",
+        )
+        .unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("BOB"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_empty_line_redo() {
+        // Blank line counts as zero values → "Redo from start"
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "\n1, 2\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_array_element_in_multi() {
+        // Mix scalar and array element in multi-value INPUT
+        let output =
+            run_program_with_input("10 DIM X(3)\n20 INPUT X(1), A\n30 PRINT X(1) + A\n40 END\n", "10, 20\n").unwrap();
+        assert!(output.contains("30")); // 10+20=30
+    }
+
+    #[test]
+    fn test_input_string_with_comma_needs_quotes() {
+        // MS-BASIC: a string containing a comma is split into separate values.
+        // "Smith, John" with two variables → "Smith" for A$, " John" for B$
+        // Verify by concatenating: "Smith" + " John" = "Smith John"
+        let output = run_program_with_input("10 INPUT A$, B$\n20 PRINT A$ + B$\n30 END\n", "Smith, John\n").unwrap();
+        assert!(output.contains("Smith"));
+        assert!(output.contains("John"));
+    }
+
+    #[test]
+    fn test_input_numeric_string_var() {
+        // A numeric-looking value for a $ variable is stored as string
+        let output = run_program_with_input("10 INPUT \"ID: \"; N$\n20 PRINT N$\n30 END\n", "12345\n").unwrap();
+        assert_eq!(output, "ID: ? 12345\n");
+    }
+
     #[test]
     fn test_counter_program() {
         let output = run_program(
@@ -1382,10 +1521,19 @@ mod tests {
     }
 
     #[test]
-    fn test_input_non_numeric_to_numeric_var() {
-        // When a non-numeric string is input for a numeric variable, it stores as string
-        let output = run_program_with_input("10 INPUT G\n20 END\n", "HELLO\n").unwrap();
-        assert_eq!(output, "? ");
+    fn test_input_non_numeric_to_numeric_var_redo() {
+        // MS-BASIC: non-numeric text for a numeric variable triggers "Redo from start"
+        // and re-prompts. Two lines of input: "HELLO" (bad) then "42" (good).
+        let output = run_program_with_input("10 INPUT G\n20 PRINT G\n30 END\n", "HELLO\n42\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("42"));
+    }
+
+    #[test]
+    fn test_input_single_non_numeric_string_var() {
+        // A non-numeric string for a $ variable is always valid
+        let output = run_program_with_input("10 INPUT N$\n20 PRINT N$\n30 END\n", "HELLO\n").unwrap();
+        assert_eq!(output, "? HELLO\n");
     }
 
     #[test]

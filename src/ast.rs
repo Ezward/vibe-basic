@@ -29,10 +29,13 @@ pub enum Statement {
     Goto {
         line_number: u32,
     },
+    /// INPUT ["prompt" (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}.
+    ///
+    /// One or more comma-separated variables; at runtime the user enters the
+    /// matching values, also separated by commas, in the same order.
     Input {
         prompt: Option<String>,
-        variable: String,
-        indices: Vec<Expr>,
+        variables: Vec<(String, Vec<Expr>)>,
         suppress_question_mark: bool,
     },
     For {
@@ -469,15 +472,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses an INPUT statement: `INPUT ["prompt" (";" | ",")] variable[(subscripts)]`.
+    /// Parses an INPUT statement:
+    /// `INPUT ["prompt" (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}`.
     ///
-    /// When a semicolon separates the prompt from the variable, a "? " is appended
-    /// to the prompt at runtime (GW-BASIC default). When a comma is used instead,
-    /// the question mark is suppressed.
+    /// One or more comma-separated variables may follow the (optional) prompt.
+    /// When a semicolon separates the prompt from the first variable, a "? " is
+    /// appended to the prompt at runtime (GW-BASIC default). When a comma is used
+    /// instead, the question mark is suppressed.
     fn parse_input(&mut self) -> Result<Statement, String> {
-        // INPUT [string (";" | ",")] variable[(subscripts)]
+        // INPUT [string (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}
         let prompt;
-        let variable;
         let suppress_question_mark;
 
         match self.peek().clone() {
@@ -487,12 +491,10 @@ impl<'a> Parser<'a> {
                     self.advance();
                     prompt = Some(s);
                     suppress_question_mark = false;
-                    variable = self.expect_identifier()?;
                 } else if *self.peek() == Token::Comma {
                     self.advance();
                     prompt = Some(s);
                     suppress_question_mark = true;
-                    variable = self.expect_identifier()?;
                 } else {
                     return Err(self.error_with_context("Expected ';' or ',' after INPUT prompt string".to_string()));
                 }
@@ -500,7 +502,6 @@ impl<'a> Parser<'a> {
             Token::Identifier(_) => {
                 prompt = None;
                 suppress_question_mark = false;
-                variable = self.expect_identifier()?;
             }
             ref tok => {
                 let msg = format!("Expected variable or string in INPUT, got {:?}", tok);
@@ -508,11 +509,22 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let indices = self.parse_optional_subscripts()?;
+        // Parse the comma-separated variable list, each with optional subscripts.
+        let mut variables = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            let indices = self.parse_optional_subscripts()?;
+            variables.push((name, indices));
+            if *self.peek() == Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
         Ok(Statement::Input {
             prompt,
-            variable,
-            indices,
+            variables,
             suppress_question_mark,
         })
     }
@@ -1024,8 +1036,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: None,
-                variable: "N$".to_string(),
-                indices: vec![],
+                variables: vec![("N$".to_string(), vec![])],
                 suppress_question_mark: false,
             }
         );
@@ -1038,8 +1049,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("GUESS (1-10): ".to_string()),
-                variable: "G".to_string(),
-                indices: vec![],
+                variables: vec![("G".to_string(), vec![])],
                 suppress_question_mark: false,
             }
         );
@@ -1052,8 +1062,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("ENTER VALUE: ".to_string()),
-                variable: "G".to_string(),
-                indices: vec![],
+                variables: vec![("G".to_string(), vec![])],
                 suppress_question_mark: true,
             }
         );
@@ -1066,8 +1075,54 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("NAME".to_string()),
-                variable: "N$".to_string(),
-                indices: vec![],
+                variables: vec![("N$".to_string(), vec![])],
+                suppress_question_mark: true,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_variables() {
+        let stmt = parse_single_statement("10 INPUT \"AGE: \"; A, W, H");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("AGE: ".to_string()),
+                variables: vec![
+                    ("A".to_string(), vec![]),
+                    ("W".to_string(), vec![]),
+                    ("H".to_string(), vec![]),
+                ],
+                suppress_question_mark: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_mixed_and_subscripted() {
+        let stmt = parse_single_statement("10 INPUT N$, A, B(2)");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: None,
+                variables: vec![
+                    ("N$".to_string(), vec![]),
+                    ("A".to_string(), vec![]),
+                    ("B".to_string(), vec![Expr::Number(2.0)]),
+                ],
+                suppress_question_mark: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_comma_suppresses_question() {
+        let stmt = parse_single_statement("10 INPUT \"A, B\", X, Y");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("A, B".to_string()),
+                variables: vec![("X".to_string(), vec![]), ("Y".to_string(), vec![]),],
                 suppress_question_mark: true,
             }
         );

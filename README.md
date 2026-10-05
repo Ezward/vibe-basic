@@ -20,7 +20,7 @@ Pirate Island adapted from David Meny original at https://unbox.ifarchive.org/?u
 |-----------|--------|-------------|
 | LET | `[LET] var = expr` | Assign a value (`LET` keyword is optional) |
 | PRINT | `PRINT [expr_list]` | Output values to the screen |
-| INPUT | `INPUT ["prompt" (;\|,)] var` | Read user input (`;` appends `?`, `,` suppresses it) |
+| INPUT | `INPUT ["prompt" (;\|,)] var {, var}` | Read one or more comma-separated values into variables (`;` appends `?`, `,` suppresses it); too few/many values or a text string for a numeric var triggers "Redo from start" |
 | IF/THEN/ELSE | `IF expr THEN clause [ELSE clause]` | Conditional (clause is a line number or statement) |
 | GOTO | `GOTO linenum` | Unconditional jump |
 | FOR/NEXT | `FOR var = start TO end [STEP val]` | Counted loop |
