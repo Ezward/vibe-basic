@@ -137,6 +137,22 @@ impl Lexer {
         Token::Number(s.parse::<f64>().unwrap())
     }
 
+    /// Reads a leading-dot numeric literal like `.5` or `.123`, producing `0.5` / `0.123`.
+    /// Assumes the current position is at the `.` and the next character is a digit.
+    fn read_leading_dot_number(&mut self) -> Token {
+        self.advance(); // consume the dot
+        let mut s = String::from("0.");
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_digit() {
+                s.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Token::Number(s.parse::<f64>().unwrap())
+    }
+
     /// Reads a double-quoted string literal, consuming the opening and closing quotes.
     fn read_string(&mut self) -> Token {
         self.advance(); // skip opening quote
@@ -313,6 +329,15 @@ impl Lexer {
                 Some(':') => {
                     self.advance();
                     tokens.push(Token::Colon);
+                }
+                Some('.') => {
+                    // Leading-dot numeral like .5 → 0.5; otherwise skip with warning
+                    if self.input.get(self.pos + 1).map_or(false, |c| c.is_ascii_digit()) {
+                        tokens.push(self.read_leading_dot_number());
+                    } else {
+                        self.advance();
+                        eprintln!("Warning: skipping unknown character '.'");
+                    }
                 }
                 Some(ch) if ch.is_ascii_digit() => {
                     tokens.push(self.read_number());
@@ -563,6 +588,48 @@ mod tests {
     fn test_tokenize_number_with_trailing_dot() {
         let tokens = Lexer::new("42.").tokenize();
         assert_eq!(tokens, vec![Token::Number(42.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_number() {
+        let tokens = Lexer::new(".5").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.5), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_number_multi_digit() {
+        let tokens = Lexer::new(".123").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.123), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_in_expression() {
+        let tokens = Lexer::new("A = .75 * 2").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Equal,
+                Token::Number(0.75),
+                Token::Star,
+                Token::Number(2.0),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_bare_dot_still_warns() {
+        // A dot not followed by a digit should still be skipped with a warning
+        let tokens = Lexer::new("A . B").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Identifier("B".to_string()),
+                Token::Eof
+            ]
+        );
     }
 
     #[test]
