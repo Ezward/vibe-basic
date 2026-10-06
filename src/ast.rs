@@ -253,6 +253,10 @@ impl<'a> Parser<'a> {
         statements.push(self.parse_statement()?);
         while *self.peek() == Token::Colon {
             self.advance();
+            // Trailing colon at end of line (e.g. `10 PRINT "HI":`) — stop parsing statements
+            if *self.peek() == Token::Newline || *self.peek() == Token::Eof {
+                break;
+            }
             statements.push(self.parse_statement()?);
         }
         // Consume newline or EOF
@@ -1237,6 +1241,29 @@ mod tests {
             }
         );
         assert_eq!(prog.lines[0].statements[1], Statement::Goto { line_number: 70 });
+    }
+
+    #[test]
+    fn test_parse_trailing_colon_at_end_of_line() {
+        let prog = parse_program("10 PRINT \"HI\":\n");
+        assert_eq!(prog.lines.len(), 1);
+        assert_eq!(prog.lines[0].statements.len(), 1);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Print { .. }));
+    }
+
+    #[test]
+    fn test_parse_trailing_colon_mid_program() {
+        let prog = parse_program("10 PRINT \"HI\":\n20 END\n");
+        assert_eq!(prog.lines.len(), 2);
+        assert_eq!(prog.lines[0].statements.len(), 1);
+        assert_eq!(prog.lines[1].statements.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_multi_statement_with_trailing_colon() {
+        let prog = parse_program("10 X = 1 : PRINT X:\n");
+        assert_eq!(prog.lines.len(), 1);
+        assert_eq!(prog.lines[0].statements.len(), 2);
     }
 
     #[test]
