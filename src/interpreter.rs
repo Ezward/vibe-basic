@@ -312,56 +312,79 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
                 Ok(StmtResult::Continue)
             }
-            Statement::Next { variable } => {
-                let for_state = if let Some(var_name) = variable {
-                    // Find the matching FOR on the stack
+            Statement::Next { variables } => {
+                // Process each variable in sequence (for NEXT A,B,C).
+                // If any loop continues, we jump back; otherwise all are popped.
+                let mut last_result = StmtResult::Continue;
+                for var_name in variables.iter() {
                     let idx = self
                         .for_stack
                         .iter()
                         .rposition(|f| f.variable == *var_name)
                         .ok_or_else(|| format!("NEXT without FOR for variable {}", var_name))?;
-                    self.for_stack[idx].clone()
-                } else {
-                    self.for_stack.last().cloned().ok_or("NEXT without FOR")?
-                };
+                    let for_state = self.for_stack[idx].clone();
 
-                // Increment the counter
-                let current = self
-                    .evaluator
-                    .variables
-                    .get(&for_state.variable)
-                    .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
-                    .as_number()?;
+                    let current = self
+                        .evaluator
+                        .variables
+                        .get(&for_state.variable)
+                        .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
+                        .as_number()?;
 
-                let new_val = current + for_state.step_val;
-                self.evaluator
-                    .variables
-                    .insert(for_state.variable.clone(), Value::Number(new_val));
+                    let new_val = current + for_state.step_val;
+                    self.evaluator
+                        .variables
+                        .insert(for_state.variable.clone(), Value::Number(new_val));
 
-                // Check if the loop continues
-                let loop_continues = if for_state.step_val > 0.0 {
-                    new_val <= for_state.end_val
-                } else {
-                    new_val >= for_state.end_val
-                };
+                    let loop_continues = if for_state.step_val > 0.0 {
+                        new_val <= for_state.end_val
+                    } else {
+                        new_val >= for_state.end_val
+                    };
 
-                if loop_continues {
-                    // Jump back to the statement after the FOR statement
-                    Ok(StmtResult::ForLoopBack {
-                        line_index: for_state.line_index,
-                        stmt_index: for_state.stmt_index + 1,
-                    })
-                } else {
-                    // Remove the FOR state from the stack
-                    if let Some(var_name) = variable {
-                        if let Some(idx) = self.for_stack.iter().rposition(|f| f.variable == *var_name) {
+                    if loop_continues {
+                        // Jump back — stop processing remaining variables
+                        last_result = StmtResult::ForLoopBack {
+                            line_index: for_state.line_index,
+                            stmt_index: for_state.stmt_index + 1,
+                        };
+                        break;
+                    } else {
+                        if let Some(idx) = self.for_stack.iter().rposition(|f| &f.variable == var_name) {
                             self.for_stack.remove(idx);
                         }
+                    }
+                }
+
+                // Handle bare NEXT (no variables) — pops the innermost FOR
+                if variables.is_empty() {
+                    let for_state = self.for_stack.last().cloned().ok_or("NEXT without FOR")?;
+                    let current = self
+                        .evaluator
+                        .variables
+                        .get(&for_state.variable)
+                        .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
+                        .as_number()?;
+                    let new_val = current + for_state.step_val;
+                    self.evaluator
+                        .variables
+                        .insert(for_state.variable.clone(), Value::Number(new_val));
+                    let loop_continues = if for_state.step_val > 0.0 {
+                        new_val <= for_state.end_val
+                    } else {
+                        new_val >= for_state.end_val
+                    };
+                    if loop_continues {
+                        last_result = StmtResult::ForLoopBack {
+                            line_index: for_state.line_index,
+                            stmt_index: for_state.stmt_index + 1,
+                        };
                     } else {
                         self.for_stack.pop();
                     }
-                    Ok(StmtResult::Continue)
                 }
+
+                Ok(last_result)
             }
             Statement::DefFn { name, params, body } => {
                 self.evaluator.user_functions.insert(
@@ -902,13 +925,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             let s_idx = for_stmt_idx + 1 + offset;
             match stmt {
                 Statement::For { .. } => depth += 1,
-                Statement::Next { variable } => {
+                Statement::Next { variables } => {
                     if depth == 0 {
-                        if let Some(v) = variable {
-                            if v == var {
-                                return Ok((for_line_idx, s_idx));
-                            }
-                        } else {
+                        if variables.is_empty() || variables.iter().any(|v| v == var) {
                             return Ok((for_line_idx, s_idx));
                         }
                     } else {
@@ -923,13 +942,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             for (s_idx, stmt) in program.lines[i].statements.iter().enumerate() {
                 match stmt {
                     Statement::For { .. } => depth += 1,
-                    Statement::Next { variable } => {
+                    Statement::Next { variables } => {
                         if depth == 0 {
-                            if let Some(v) = variable {
-                                if v == var {
-                                    return Ok((i, s_idx));
-                                }
-                            } else {
+                            if variables.is_empty() || variables.iter().any(|v| v == var) {
                                 return Ok((i, s_idx));
                             }
                         } else {
@@ -1419,6 +1434,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, " 1  1  1  2 \n 2  1  2  2 \n");
+    }
+
+    #[test]
+    fn test_next_multiple_variables() {
+        // NEXT J,I closes both loops in one statement
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 2
+20 FOR J = 1 TO 2
+30 PRINT I; J;
+40 NEXT J, I
+50 PRINT
+60 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  1  1  2  2  1  2  2 \n");
     }
 
     #[test]

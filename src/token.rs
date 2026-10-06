@@ -139,7 +139,7 @@ impl Lexer {
         if let Some(ch) = self.peek() {
             if ch == 'e' || ch == 'E' {
                 // Look ahead past E to check for optional sign then digit
-                let mut lookahead = self.pos + 1;
+                let lookahead = self.pos + 1;
                 let next_after_e = self.input.get(lookahead);
                 let is_exponent = match next_after_e {
                     Some('+') | Some('-') => self.input.get(lookahead + 1).map_or(false, |c| c.is_ascii_digit()),

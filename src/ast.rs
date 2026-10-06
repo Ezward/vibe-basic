@@ -45,7 +45,7 @@ pub enum Statement {
         step: Option<Expr>,
     },
     Next {
-        variable: Option<String>,
+        variables: Vec<String>,
     },
     Data {
         values: Vec<Expr>,
@@ -298,12 +298,21 @@ impl<'a> Parser<'a> {
             }
             Token::Next => {
                 self.advance();
-                let variable = if let Token::Identifier(_) = self.peek() {
-                    Some(self.expect_identifier()?)
-                } else {
-                    None
-                };
-                Ok(Statement::Next { variable })
+                let mut variables = Vec::new();
+                if let Token::Identifier(_) = self.peek() {
+                    variables.push(self.expect_identifier()?);
+                }
+                while *self.peek() == Token::Comma {
+                    self.advance();
+                    if let Token::Identifier(_) = self.peek() {
+                        variables.push(self.expect_identifier()?);
+                    } else {
+                        return Err(self.error_with_context(
+                            "Expected variable name after comma in NEXT".to_string(),
+                        ));
+                    }
+                }
+                Ok(Statement::Next { variables })
             }
             Token::Rem(text) => {
                 self.advance();
@@ -1170,18 +1179,35 @@ mod tests {
     #[test]
     fn test_parse_next() {
         let stmt = parse_single_statement("40 NEXT I");
-        assert_eq!(
-            stmt,
-            Statement::Next {
-                variable: Some("I".to_string()),
-            }
-        );
+        assert_eq!(stmt, Statement::Next { variables: vec!["I".to_string()] });
     }
 
     #[test]
     fn test_parse_next_no_var() {
         let stmt = parse_single_statement("40 NEXT");
-        assert_eq!(stmt, Statement::Next { variable: None });
+        assert_eq!(stmt, Statement::Next { variables: vec![] });
+    }
+
+    #[test]
+    fn test_parse_next_multiple_vars() {
+        let stmt = parse_single_statement("40 NEXT Y, X");
+        assert_eq!(
+            stmt,
+            Statement::Next {
+                variables: vec!["Y".to_string(), "X".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_next_three_vars() {
+        let stmt = parse_single_statement("40 NEXT A, B, C");
+        assert_eq!(
+            stmt,
+            Statement::Next {
+                variables: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            }
+        );
     }
 
     #[test]
