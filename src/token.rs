@@ -111,7 +111,8 @@ impl Lexer {
         }
     }
 
-    /// Reads a numeric literal (integer or floating-point) starting at the current position.
+    /// Reads a numeric literal (integer, floating-point, or scientific notation) starting
+    /// at the current position. Handles forms like `42`, `3.14`, `1E-03`, `8.84361E-04`.
     fn read_number(&mut self) -> Token {
         let mut s = String::new();
         while let Some(ch) = self.peek() {
@@ -131,6 +132,35 @@ impl Lexer {
                     self.advance();
                 } else {
                     break;
+                }
+            }
+        }
+        // Scientific notation: E or e followed by optional +/- and digits
+        if let Some(ch) = self.peek() {
+            if ch == 'e' || ch == 'E' {
+                // Look ahead past E to check for optional sign then digit
+                let mut lookahead = self.pos + 1;
+                let next_after_e = self.input.get(lookahead);
+                let is_exponent = match next_after_e {
+                    Some('+') | Some('-') => self.input.get(lookahead + 1).map_or(false, |c| c.is_ascii_digit()),
+                    Some(c) => c.is_ascii_digit(),
+                    None => false,
+                };
+                if is_exponent {
+                    s.push('E');
+                    self.advance(); // consume E
+                    if self.peek() == Some('+') || self.peek() == Some('-') {
+                        s.push(self.peek().unwrap());
+                        self.advance();
+                    }
+                    while let Some(ch) = self.peek() {
+                        if ch.is_ascii_digit() {
+                            s.push(ch);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -655,6 +685,70 @@ mod tests {
             vec![
                 Token::Identifier("A".to_string()),
                 Token::Identifier("B".to_string()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_negative_exponent() {
+        let tokens = Lexer::new("1E-03").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.001), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_positive_exponent() {
+        let tokens = Lexer::new("1E+03").tokenize();
+        assert_eq!(tokens, vec![Token::Number(1000.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_float_base() {
+        let tokens = Lexer::new("8.84361E-04").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.000884361), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_lowercase_e() {
+        let tokens = Lexer::new("1.5e-2").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.015), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_in_expression() {
+        let tokens = Lexer::new("G=1E-03:Z=1.8").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("G".to_string()),
+                Token::Equal,
+                Token::Number(0.001),
+                Token::Colon,
+                Token::Identifier("Z".to_string()),
+                Token::Equal,
+                Token::Number(1.8),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_identifier_with_e_not_exponent() {
+        // E followed by a letter (not sign+digit) is NOT an exponent
+        let tokens = Lexer::new("E").tokenize();
+        assert_eq!(tokens, vec![Token::Identifier("E".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_number_followed_by_identifier_e() {
+        // A space between number and E means it's a separate identifier
+        let tokens = Lexer::new("A 2E").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Number(2.0),
+                Token::Identifier("E".to_string()),
                 Token::Eof
             ]
         );
