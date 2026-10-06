@@ -221,8 +221,9 @@ impl Lexer {
             "OR" => Token::Or,
             "XOR" => Token::Xor,
             "NOT" => Token::Not,
-            "REM" => {
-                // Consume rest of line as remark
+            upper if upper.starts_with("REM") => {
+                // Consume rest of line as remark. Classic CC-BASIC treats any word
+                // starting with "REM" (e.g. REMEMBER, REMARKABLE) as a comment.
                 let mut comment = String::new();
                 while let Some(ch) = self.peek() {
                     if ch == '\n' {
@@ -478,6 +479,33 @@ mod tests {
     fn test_tokenize_remark() {
         let tokens = Lexer::new("REM THIS IS A COMMENT").tokenize();
         assert_eq!(tokens, vec![Token::Rem("THIS IS A COMMENT".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_remark_prefix_remember() {
+        let tokens = Lexer::new("REMEMBER THE TERMINATION CONDITION, AND DO NOT BECOME TOO ANXIOUS").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Rem("THE TERMINATION CONDITION, AND DO NOT BECOME TOO ANXIOUS".to_string()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_remark_prefix_remarkable() {
+        let tokens = Lexer::new("REMARKABLE PROGRAM BY DAVID AHL").tokenize();
+        assert_eq!(
+            tokens,
+            vec![Token::Rem("PROGRAM BY DAVID AHL".to_string()), Token::Eof]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_remark_lowercase_prefix() {
+        let tokens = Lexer::new("remember this").tokenize();
+        assert_eq!(tokens, vec![Token::Rem("this".to_string()), Token::Eof]);
     }
 
     #[test]
