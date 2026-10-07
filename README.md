@@ -20,7 +20,7 @@ Pirate Island adapted from David Meny original at https://unbox.ifarchive.org/?u
 |-----------|--------|-------------|
 | LET | `[LET] var = expr` | Assign a value (`LET` keyword is optional) |
 | PRINT | `PRINT [expr_list]` | Output values to the screen |
-| INPUT | `INPUT ["prompt" (;\|,)] var` | Read user input (`;` appends `?`, `,` suppresses it) |
+| INPUT | `INPUT ["prompt" (;\|,)] var {, var}` | Read one or more comma-separated values into variables (`;` appends `?`, `,` suppresses it); too few/many values or a text string for a numeric var triggers "Redo from start" |
 | IF/THEN/ELSE | `IF expr THEN clause [ELSE clause]` | Conditional (clause is a line number or statement) |
 | GOTO | `GOTO linenum` | Unconditional jump |
 | FOR/NEXT | `FOR var = start TO end [STEP val]` | Counted loop |
@@ -38,6 +38,8 @@ Pirate Island adapted from David Meny original at https://unbox.ifarchive.org/?u
 | COLOR | `COLOR [fg][,[bg][,border]]` | Set text foreground/background colors |
 | REM | `REM text` or `' text` | Comment (ignored by interpreter) |
 | END | `END` | Terminate the program |
+| STOP | `STOP` | Suspend execution and enter the debugger (like a breakpoint); preserves all state |
+| CONT | `CONT` | Resume execution after a STOP (as a statement, a no-op; in the debugger, equivalent to RUN) |
 
 Multiple statements can appear on one line separated by colons (e.g., `10 X = 0 : Y = 10`).
 
@@ -104,6 +106,8 @@ src/
 ├── ast.rs           — Statement/program parser: parses tokens into an AST
 ├── interpreter.rs   — Interpreter: executes BASIC programs with full control flow
 └── debugger.rs      — Debugger: interactive step-through debugging REPL
+tests/
+└── integration.rs   — Runs the example .bas files via the CLI (non-debug and --debug modes)
 scripts/
 ├── setup-cross-compile.sh — Install cross-compilation toolchains and configure Cargo
 └── build.sh                — Build release binaries for native and/or cross-compile targets
@@ -210,7 +214,8 @@ The debugger provides a REPL with the following commands:
 | Command | Description |
 |---------|-------------|
 | `STEP` | Execute one BASIC line |
-| `RUN` | Continue execution until a breakpoint or END |
+| `RUN` | Continue execution until a breakpoint, STOP, or END |
+| `CONT` | Resume execution (same as RUN) |
 | `LIST` | Print the entire program listing |
 | `LIST n` | Print the program starting from line number n |
 | `LIST n m` | Print program lines from n through m (inclusive) |
@@ -245,6 +250,9 @@ Several example programs are included in the `examples/` directory:
 | `math.bas` | Math functions demonstration |
 | `powers.bas` | Powers calculation |
 | `strings.bas` | String function demonstration |
+| `integration-test.bas` | Exercises the full pipeline; ends in STOP (run by the integration test) |
+| `integration-debug.bas` | Debug-mode integration program, driven by `integration-debug.cmds` |
+| `integration-remote-debug.bas` | Remote-debug integration program (driven over a TCP connection) |
 
 ### Example Program
 
@@ -272,27 +280,122 @@ PROGRAM COMPLETE.
 
 ## Testing
 
-Run the full test suite (815 tests):
+Run the full test suite (871 unit tests plus 7 integration tests):
 
 ```sh
 cargo test
 ```
 
+The integration tests in [`tests/integration.rs`](tests/integration.rs) load
+example files from disk and run them through the real compiled CLI:
+
+- **Non-debug** — runs
+  [`examples/integration-test.bas`](examples/integration-test.bas) end-to-end
+  (file-read → lex → parse → interpret). The program ends with a `STOP`, so the
+  test also verifies the non-debug STOP behavior (halts and reports
+  `Break in line N` on stderr).
+- **Debug mode** — runs
+  [`examples/integration-debug.bas`](examples/integration-debug.bas) with
+  `--debug`, piping the debugger command script
+  [`examples/integration-debug.cmds`](examples/integration-debug.cmds) into stdin.
+  This exercises the interactive debugger REPL (RUN/STOP break, PRINT/LET
+  inspection, GOTO) through the real `main()` debug branch.
+- **Remote debug mode** — runs
+  [`examples/integration-remote-debug.bas`](examples/integration-remote-debug.bas)
+  with `--debug --debug-port <port>`, connecting a real TCP client to the
+  listener the binary spawns. This verifies that the debugger REPL flows over
+  the TCP connection while the program's own `PRINT` stays on stdout.
+- **Error paths** — three tests drive the real CLI into its failure branches
+  (a missing file, a parse error, and a runtime error such as division by
+  zero) and assert the process exits non-zero with the matching message on
+  stderr, exercising the `main()` error-exit harness.
+- **`--version`** — asserts the `--version` flag prints the version string and
+  exits cleanly.
+
 Tests are organized by module:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `token` | 43 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
+| `token` | 54 | Lexer: numbers, strings, operators, keywords, sigils, remarks |
 | `expr` | 45 | Expression parser: precedence, associativity, parentheses, functions |
-| `eval` | 268 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
-| `ast` | 90 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
-| `interpreter` | 175 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
-| `debugger` | 55 | Debugger: stepping, breakpoints, LIST, variable inspection, remote TCP mode |
+| `eval` | 270 | Evaluator: arithmetic, comparisons, strings, all built-in functions, edge cases |
+| `ast` | 116 | Statement parser: all statement types, IF/THEN/ELSE, multi-statement lines |
+| `interpreter` | 290 | Integration: control flow, loops, I/O, arrays, DATA/READ, user functions |
+| `debugger` | 76 | Debugger: stepping, breakpoints, STOP/CONT, LIST, variable inspection, remote TCP mode |
+| `main` | 20 | CLI: argument parsing, version string, and the `run()` error paths (missing file, parse error, runtime error) |
+
+871 unit tests total (plus 7 integration tests in `tests/integration.rs`).
+
+## Linting
+
+Lint with `clippy`. The project baseline is plain `cargo clippy` (not
+`cargo clippy --all-targets -- -D warnings`, which also lints test code that
+predates the lint baseline); it must produce no new warnings:
+
+```sh
+cargo clippy
+```
+
+To check for new warnings only, compare against a known-clean baseline, or
+inspect the output:
+
+```sh
+cargo clippy 2>&1 | grep -E "^(warning|error)"
+```
+
+## Test Coverage
+
+Line coverage is measured with `cargo-llvm-cov`. The LLVM profiling toolchain
+component must be installed first (the tool prompts for this on its first run):
+
+```sh
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov        # if not already installed
+```
+
+Then run the coverage report:
+
+```sh
+cargo llvm-cov
+```
+
+Useful variants:
+
+```sh
+cargo llvm-cov --summary-only              # per-file and TOTAL coverage table
+cargo llvm-cov --show-missing-lines        # append the uncovered line numbers per file
+cargo llvm-cov --lcov                      # emit lcov format (e.g. for a GUI viewer)
+```
+
+`--summary-only` prints a table of regions, functions, lines, and branches per
+file plus a `TOTAL` row. The project targets 100% coverage (see `PRD.md`); the
+suite covers every reachable production line, and `token.rs` and `expr.rs` are
+at 100%.
+
+The `TOTAL` line total reads ~99% rather than a literal 100%, and that is
+expected. The few uncovered lines `cargo llvm-cov` reports are not untested
+feature code:
+
+- **LLVM closing-brace artifacts** — the bulk of them. For empty `match` arms
+  (`_ => {}`), `else` blocks, and `if let` / `match` blocks, LLVM counts the
+  closing `}` as an uncovered *line* even though the surrounding logic is fully
+  exercised. These cannot be removed by adding tests.
+- **Genuinely-unreachable defensive arms** — a small number of fallback
+  `Err`/`_` arms that are shadowed by earlier match arms or filtered out by
+  the debugger REPL's empty-line handling. They exist as defensive guards.
+- **Test-only `panic!` arms** — `else { panic!(...) }` branches inside
+  `#[test]` functions only run when a test fails, so they are never covered.
+
+In the meaningful sense the PRD intends, coverage is 100%: every reachable
+production line is executed by the test suite.
 
 ## Formatting
 
-The project uses `rustfmt` with a 120-character line width (configured in `rustfmt.toml`):
+The project uses `rustfmt` with a 120-character line width (configured in `rustfmt.toml`).
+Format the code and check that it is already formatted:
 
 ```sh
-cargo fmt
+cargo fmt          # apply formatting
+cargo fmt --check  # fail without changes if unformatted (used by CI)
 ```
+

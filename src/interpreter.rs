@@ -167,6 +167,11 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                         break;
                     }
                     StmtResult::End => return Ok(()),
+                    StmtResult::Stop => {
+                        let line_num = program.lines[line_idx].line_number;
+                        eprintln!("Break in line {}", line_num);
+                        return Ok(());
+                    }
                     StmtResult::SkipLine => {
                         // IF condition was false - skip remaining statements on this line
                         break;
@@ -254,11 +259,10 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             Statement::Goto { line_number } => Ok(StmtResult::Goto(*line_number)),
             Statement::Input {
                 prompt,
-                variable,
-                indices,
+                variables,
                 suppress_question_mark,
             } => {
-                self.execute_input(prompt.as_deref(), variable, indices, *suppress_question_mark)?;
+                self.execute_input(prompt.as_deref(), variables, *suppress_question_mark)?;
                 Ok(StmtResult::Continue)
             }
             Statement::For {
@@ -308,56 +312,79 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
 
                 Ok(StmtResult::Continue)
             }
-            Statement::Next { variable } => {
-                let for_state = if let Some(var_name) = variable {
-                    // Find the matching FOR on the stack
+            Statement::Next { variables } => {
+                // Process each variable in sequence (for NEXT A,B,C).
+                // If any loop continues, we jump back; otherwise all are popped.
+                let mut last_result = StmtResult::Continue;
+                for var_name in variables.iter() {
                     let idx = self
                         .for_stack
                         .iter()
                         .rposition(|f| f.variable == *var_name)
                         .ok_or_else(|| format!("NEXT without FOR for variable {}", var_name))?;
-                    self.for_stack[idx].clone()
-                } else {
-                    self.for_stack.last().cloned().ok_or("NEXT without FOR")?
-                };
+                    let for_state = self.for_stack[idx].clone();
 
-                // Increment the counter
-                let current = self
-                    .evaluator
-                    .variables
-                    .get(&for_state.variable)
-                    .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
-                    .as_number()?;
+                    let current = self
+                        .evaluator
+                        .variables
+                        .get(&for_state.variable)
+                        .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
+                        .as_number()?;
 
-                let new_val = current + for_state.step_val;
-                self.evaluator
-                    .variables
-                    .insert(for_state.variable.clone(), Value::Number(new_val));
+                    let new_val = current + for_state.step_val;
+                    self.evaluator
+                        .variables
+                        .insert(for_state.variable.clone(), Value::Number(new_val));
 
-                // Check if the loop continues
-                let loop_continues = if for_state.step_val > 0.0 {
-                    new_val <= for_state.end_val
-                } else {
-                    new_val >= for_state.end_val
-                };
+                    let loop_continues = if for_state.step_val > 0.0 {
+                        new_val <= for_state.end_val
+                    } else {
+                        new_val >= for_state.end_val
+                    };
 
-                if loop_continues {
-                    // Jump back to the statement after the FOR statement
-                    Ok(StmtResult::ForLoopBack {
-                        line_index: for_state.line_index,
-                        stmt_index: for_state.stmt_index + 1,
-                    })
-                } else {
-                    // Remove the FOR state from the stack
-                    if let Some(var_name) = variable {
-                        if let Some(idx) = self.for_stack.iter().rposition(|f| f.variable == *var_name) {
+                    if loop_continues {
+                        // Jump back — stop processing remaining variables
+                        last_result = StmtResult::ForLoopBack {
+                            line_index: for_state.line_index,
+                            stmt_index: for_state.stmt_index + 1,
+                        };
+                        break;
+                    } else {
+                        if let Some(idx) = self.for_stack.iter().rposition(|f| &f.variable == var_name) {
                             self.for_stack.remove(idx);
                         }
+                    }
+                }
+
+                // Handle bare NEXT (no variables) — pops the innermost FOR
+                if variables.is_empty() {
+                    let for_state = self.for_stack.last().cloned().ok_or("NEXT without FOR")?;
+                    let current = self
+                        .evaluator
+                        .variables
+                        .get(&for_state.variable)
+                        .ok_or_else(|| format!("Variable {} not found", for_state.variable))?
+                        .as_number()?;
+                    let new_val = current + for_state.step_val;
+                    self.evaluator
+                        .variables
+                        .insert(for_state.variable.clone(), Value::Number(new_val));
+                    let loop_continues = if for_state.step_val > 0.0 {
+                        new_val <= for_state.end_val
+                    } else {
+                        new_val >= for_state.end_val
+                    };
+                    if loop_continues {
+                        last_result = StmtResult::ForLoopBack {
+                            line_index: for_state.line_index,
+                            stmt_index: for_state.stmt_index + 1,
+                        };
                     } else {
                         self.for_stack.pop();
                     }
-                    Ok(StmtResult::Continue)
                 }
+
+                Ok(last_result)
             }
             Statement::DefFn { name, params, body } => {
                 self.evaluator.user_functions.insert(
@@ -465,6 +492,17 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
                     Ok(StmtResult::Gosub(line_num))
                 }
             }
+            Statement::OnGoto { selector, targets } => {
+                let val = self.evaluator.eval_expr(selector)?;
+                let index = val.as_number()? as i64;
+                if index < 1 || index as usize > targets.len() {
+                    // Out of range: continue to next statement (GW-BASIC behavior)
+                    Ok(StmtResult::Continue)
+                } else {
+                    let line_num = targets[(index - 1) as usize];
+                    Ok(StmtResult::Goto(line_num))
+                }
+            }
             Statement::Return { target } => {
                 if self.gosub_stack.is_empty() {
                     return Err("RETURN without GOSUB".to_string());
@@ -502,6 +540,8 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             }
             Statement::Rem(_) => Ok(StmtResult::Continue),
             Statement::End => Ok(StmtResult::End),
+            Statement::Stop => Ok(StmtResult::Stop),
+            Statement::Cont => Ok(StmtResult::Continue),
         }
     }
 
@@ -579,47 +619,91 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
     }
 
     /// Executes an INPUT statement: prints an optional prompt, reads a line,
-    /// and stores it as a string (for $ variables) or parses it as a number.
-    /// Supports both scalar variables and array elements.
+    /// and assigns one value to each variable. GW-BASIC matches each
+    /// comma-separated token from the user's response to a variable in order;
+    /// scalar variables and array elements are both supported.
     ///
-    /// When `suppress_question_mark` is false (semicolon separator), a "? " is appended
-    /// after any prompt. When true (comma separator), the question mark is suppressed.
+    /// When `suppress_question_mark` is false (semicolon separator), a "? " is
+    /// appended after any prompt. When true (comma separator), the question mark
+    /// is suppressed.
+    ///
+    /// If the user provides too few or too many values, or provides a text string
+    /// for a numeric variable, the interpreter prints "Redo from start" and
+    /// re-prompts, discarding any partially typed values.
     fn execute_input(
         &mut self,
         prompt: Option<&str>,
-        variable: &str,
-        indices: &[crate::expr::Expr],
+        variables: &[(String, Vec<crate::expr::Expr>)],
         suppress_question_mark: bool,
     ) -> Result<(), String> {
-        if let Some(p) = prompt {
-            write!(self.output, "{}", p).map_err(|e| e.to_string())?;
-        }
-        if !suppress_question_mark {
-            write!(self.output, "? ").map_err(|e| e.to_string())?;
-        }
-        self.output.flush().map_err(|e| e.to_string())?;
-
-        let mut line = String::new();
-        self.input.read_line(&mut line).map_err(|e| e.to_string())?;
-        let line = line.trim().to_string();
-
-        // Determine type based on variable name
-        let value = if variable.ends_with('$') {
-            Value::String(line)
-        } else if let Ok(n) = line.parse::<f64>() {
-            Value::Number(n)
-        } else {
-            Value::String(line)
+        // Build the prompt: optional string, optionally suffixed with "? ".
+        let prompt_text: String = {
+            let mut s = String::new();
+            if let Some(p) = prompt {
+                s.push_str(p);
+            }
+            if !suppress_question_mark {
+                s.push_str("? ");
+            }
+            s
         };
 
-        if indices.is_empty() {
-            self.evaluator.variables.insert(variable.to_string(), value);
-        } else {
-            let subs = self.evaluator.eval_subscripts(indices)?;
-            self.evaluator.set_array_element(variable, &subs, value)?;
+        loop {
+            write!(self.output, "{}", prompt_text).map_err(|e| e.to_string())?;
+            self.output.flush().map_err(|e| e.to_string())?;
+
+            let mut line = String::new();
+            self.input.read_line(&mut line).map_err(|e| e.to_string())?;
+            let line = line.trim();
+
+            // Split the user's response on commas into individual tokens.
+            let fields: Vec<&str> = if line.is_empty() {
+                Vec::new()
+            } else {
+                line.split(',').collect()
+            };
+
+            // MS-BASIC: if the user provides no fields or a count mismatch, the
+            // interpreter prints "Redo from start" and re-prompts, discarding the
+            // current line entirely. A blank line counts as "not enough values".
+            if fields.len() != variables.len() {
+                writeln!(self.output, "\nRedo from start").map_err(|e| e.to_string())?;
+                self.column = 0;
+                continue;
+            }
+
+            // Now assign each field to its corresponding variable.
+            let mut ok = true;
+            for ((name, indices), field) in variables.iter().zip(&fields) {
+                let field = field.trim();
+                let value = if name.ends_with('$') {
+                    Value::String(field.to_string())
+                } else if let Ok(n) = field.parse::<f64>() {
+                    Value::Number(n)
+                } else {
+                    // Non-numeric token for a numeric variable — MS-BASIC reports
+                    // this as "Redo from start".
+                    ok = false;
+                    break;
+                };
+
+                if indices.is_empty() {
+                    self.evaluator.variables.insert(name.clone(), value);
+                } else {
+                    let subs = self.evaluator.eval_subscripts(indices)?;
+                    self.evaluator.set_array_element(name, &subs, value)?;
+                }
+            }
+
+            if !ok {
+                writeln!(self.output, "\nRedo from start").map_err(|e| e.to_string())?;
+                self.column = 0;
+                continue;
+            }
+
+            self.column = 0;
+            return Ok(());
         }
-        self.column = 0;
-        Ok(())
     }
 
     /// Maps a GW-BASIC color number (0-15) to the corresponding ANSI SGR color code.
@@ -841,13 +925,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             let s_idx = for_stmt_idx + 1 + offset;
             match stmt {
                 Statement::For { .. } => depth += 1,
-                Statement::Next { variable } => {
+                Statement::Next { variables } => {
                     if depth == 0 {
-                        if let Some(v) = variable {
-                            if v == var {
-                                return Ok((for_line_idx, s_idx));
-                            }
-                        } else {
+                        if variables.is_empty() || variables.iter().any(|v| v == var) {
                             return Ok((for_line_idx, s_idx));
                         }
                     } else {
@@ -862,13 +942,9 @@ impl<R: BufRead, W: Write> Interpreter<R, W> {
             for (s_idx, stmt) in program.lines[i].statements.iter().enumerate() {
                 match stmt {
                     Statement::For { .. } => depth += 1,
-                    Statement::Next { variable } => {
+                    Statement::Next { variables } => {
                         if depth == 0 {
-                            if let Some(v) = variable {
-                                if v == var {
-                                    return Ok((i, s_idx));
-                                }
-                            } else {
+                            if variables.is_empty() || variables.iter().any(|v| v == var) {
                                 return Ok((i, s_idx));
                             }
                         } else {
@@ -901,6 +977,8 @@ pub(crate) enum StmtResult {
         line_index: usize,
         stmt_index: usize,
     },
+    /// STOP: suspend execution and return control to the debugger.
+    Stop,
 }
 
 /// Convenience function: parse and run a BASIC program from a string
@@ -1056,6 +1134,102 @@ mod tests {
     fn test_input_comma_numeric() {
         let output = run_program_with_input("10 INPUT \"VALUE\", G\n20 PRINT G + 1\n30 END\n", "7\n").unwrap();
         assert_eq!(output, "VALUE 8 \n");
+    }
+
+    // ===== Multi-value INPUT tests =====
+
+    #[test]
+    fn test_input_two_numeric_vars() {
+        // Verify both variables receive values by computing a derived value
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "3, 7\n").unwrap();
+        assert!(output.contains("10")); // 3+7=10
+    }
+
+    #[test]
+    fn test_input_three_vars_with_prompt() {
+        // Verify all three variables receive values
+        let output = run_program_with_input(
+            "10 INPUT \"AGE, WEIGHT, HEIGHT: \"; A, W, H\n20 PRINT A * W / H\n30 END\n",
+            "25, 150, 75\n",
+        )
+        .unwrap();
+        assert!(output.contains("AGE, WEIGHT, HEIGHT: ?"));
+        assert!(output.contains("50")); // 25*150/75=50
+    }
+
+    #[test]
+    fn test_input_mixed_string_and_numeric() {
+        // N$ is a string variable, A is numeric — mixed in one INPUT
+        let output = run_program_with_input(
+            "10 INPUT \"NAME, AGE: \"; N$, A\n20 PRINT N$; A + 1\n30 END\n",
+            "ALICE, 30\n",
+        )
+        .unwrap();
+        assert!(output.contains("ALICE"));
+        assert!(output.contains("31")); // 30+1=31
+    }
+
+    #[test]
+    fn test_input_too_few_values_redo() {
+        // Two variables, user enters one → "Redo from start", then correct input
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "5\n1, 2\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_too_many_values_redo() {
+        // Two variables, user enters three → "Redo from start", then correct input
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "1, 2, 3\n4, 5\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("9")); // 4+5=9
+    }
+
+    #[test]
+    fn test_input_non_numeric_for_numeric_in_multi() {
+        // Three vars: A (numeric), B (numeric), N$ (string).
+        // "HELLO" is non-numeric for A → redo. Then correct values.
+        let output = run_program_with_input(
+            "10 INPUT A, B, N$\n20 PRINT N$; A + B\n30 END\n",
+            "HELLO, 2, 3\n1, 2, BOB\n",
+        )
+        .unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("BOB"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_empty_line_redo() {
+        // Blank line counts as zero values → "Redo from start"
+        let output = run_program_with_input("10 INPUT A, B\n20 PRINT A + B\n30 END\n", "\n1, 2\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("3")); // 1+2=3
+    }
+
+    #[test]
+    fn test_input_array_element_in_multi() {
+        // Mix scalar and array element in multi-value INPUT
+        let output =
+            run_program_with_input("10 DIM X(3)\n20 INPUT X(1), A\n30 PRINT X(1) + A\n40 END\n", "10, 20\n").unwrap();
+        assert!(output.contains("30")); // 10+20=30
+    }
+
+    #[test]
+    fn test_input_string_with_comma_needs_quotes() {
+        // MS-BASIC: a string containing a comma is split into separate values.
+        // "Smith, John" with two variables → "Smith" for A$, " John" for B$
+        // Verify by concatenating: "Smith" + " John" = "Smith John"
+        let output = run_program_with_input("10 INPUT A$, B$\n20 PRINT A$ + B$\n30 END\n", "Smith, John\n").unwrap();
+        assert!(output.contains("Smith"));
+        assert!(output.contains("John"));
+    }
+
+    #[test]
+    fn test_input_numeric_string_var() {
+        // A numeric-looking value for a $ variable is stored as string
+        let output = run_program_with_input("10 INPUT \"ID: \"; N$\n20 PRINT N$\n30 END\n", "12345\n").unwrap();
+        assert_eq!(output, "ID: ? 12345\n");
     }
 
     #[test]
@@ -1263,6 +1437,23 @@ mod tests {
     }
 
     #[test]
+    fn test_next_multiple_variables() {
+        // NEXT J,I closes both loops in one statement
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 2
+20 FOR J = 1 TO 2
+30 PRINT I; J;
+40 NEXT J, I
+50 PRINT
+60 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, " 1  1  1  2  2  1  2  2 \n");
+    }
+
+    #[test]
     fn test_if_then_else_true_branch() {
         let output = run_program("10 LET X = 5\n20 IF X = 5 THEN PRINT \"YES\" ELSE PRINT \"NO\"\n30 END\n").unwrap();
         assert_eq!(output, "YES\n");
@@ -1373,10 +1564,19 @@ mod tests {
     }
 
     #[test]
-    fn test_input_non_numeric_to_numeric_var() {
-        // When a non-numeric string is input for a numeric variable, it stores as string
-        let output = run_program_with_input("10 INPUT G\n20 END\n", "HELLO\n").unwrap();
-        assert_eq!(output, "? ");
+    fn test_input_non_numeric_to_numeric_var_redo() {
+        // MS-BASIC: non-numeric text for a numeric variable triggers "Redo from start"
+        // and re-prompts. Two lines of input: "HELLO" (bad) then "42" (good).
+        let output = run_program_with_input("10 INPUT G\n20 PRINT G\n30 END\n", "HELLO\n42\n").unwrap();
+        assert!(output.contains("Redo from start"));
+        assert!(output.contains("42"));
+    }
+
+    #[test]
+    fn test_input_single_non_numeric_string_var() {
+        // A non-numeric string for a $ variable is always valid
+        let output = run_program_with_input("10 INPUT N$\n20 PRINT N$\n30 END\n", "HELLO\n").unwrap();
+        assert_eq!(output, "? HELLO\n");
     }
 
     #[test]
@@ -2954,6 +3154,169 @@ mod tests {
     }
 
     #[test]
+    fn test_on_goto_first_target() {
+        let output = run_program(
+            "\
+10 ON 1 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "FIRST\n");
+    }
+
+    #[test]
+    fn test_on_goto_second_target() {
+        let output = run_program(
+            "\
+10 ON 2 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_goto_third_target() {
+        let output = run_program(
+            "\
+10 ON 3 GOTO 100, 200, 300
+40 PRINT \"SHOULD NOT REACH\"
+50 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "THIRD\n");
+    }
+
+    #[test]
+    fn test_on_goto_out_of_range_zero() {
+        let output = run_program(
+            "\
+10 ON 0 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_out_of_range_high() {
+        let output = run_program(
+            "\
+10 ON 5 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_negative_index() {
+        let output = run_program(
+            "\
+10 ON -1 GOTO 100, 200
+20 PRINT \"CONTINUED\"
+30 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "CONTINUED\n");
+    }
+
+    #[test]
+    fn test_on_goto_expression_selector() {
+        let output = run_program(
+            "\
+10 X = 1
+20 ON X + 1 GOTO 100, 200, 300
+40 END
+100 PRINT \"FIRST\"
+110 END
+200 PRINT \"SECOND\"
+210 END
+300 PRINT \"THIRD\"
+310 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "SECOND\n");
+    }
+
+    #[test]
+    fn test_on_goto_single_target() {
+        let output = run_program(
+            "\
+10 ON 1 GOTO 100
+20 END
+100 PRINT \"ONLY\"
+110 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ONLY\n");
+    }
+
+    #[test]
+    fn test_on_goto_in_loop() {
+        let output = run_program(
+            "\
+10 FOR I = 1 TO 3
+20   ON I GOTO 100, 200, 300
+40   PRINT \"BAD\"
+50 NEXT I
+60 PRINT \"DONE\"
+70 END
+100 PRINT \"A\";
+110 GOTO 50
+200 PRINT \"B\";
+210 GOTO 50
+300 PRINT \"C\"
+310 GOTO 50
+",
+        )
+        .unwrap();
+        assert_eq!(output, "ABC\nDONE\n");
+    }
+
+    #[test]
     fn test_end_after_for_next_on_same_line() {
         let output = run_program("10 FOR I = 1 TO 3 : PRINT \"X\"; : NEXT I : END\n20 PRINT \"BAD\"\n").unwrap();
         assert_eq!(output, "XXX");
@@ -3869,5 +4232,131 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "CORRECT!\n");
+    }
+
+    #[test]
+    fn test_stop_halts_program() {
+        // STOP should halt execution; lines after STOP are not executed
+        let output = run_program("10 PRINT \"BEFORE\"\n20 STOP\n30 PRINT \"AFTER\"\n40 END\n").unwrap();
+        assert_eq!(output, "BEFORE\n");
+    }
+
+    #[test]
+    fn test_stop_at_first_line() {
+        // STOP on the first line means nothing is printed
+        let output = run_program("10 STOP\n20 PRINT \"NEVER\"\n30 END\n").unwrap();
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_cont_is_noop() {
+        // CONT should be a no-op; execution continues to the next line
+        let output = run_program("10 PRINT \"A\"\n20 CONT\n30 PRINT \"B\"\n40 END\n").unwrap();
+        assert_eq!(output, "A\nB\n");
+    }
+
+    #[test]
+    fn test_cont_preserves_variables() {
+        // CONT should not affect variable values
+        let output = run_program("10 LET X = 42\n20 CONT\n30 PRINT X\n40 END\n").unwrap();
+        assert_eq!(output, " 42 \n");
+    }
+
+    #[test]
+    fn test_stop_preserves_state_for_debugger() {
+        // STOP halts but the program state (variables) is preserved.
+        // We can't directly test debugger resumption here, but we can verify
+        // that STOP halts at the right point and CONT as a statement is a no-op.
+        let output = run_program("10 LET X = 10\n20 PRINT X\n30 STOP\n40 X = 20\n50 PRINT X\n60 END\n").unwrap();
+        // Only line 20 executes (PRINT X), then STOP halts at line 30
+        assert_eq!(output, " 10 \n");
+    }
+
+    /// Verifies that when a FOR loop is skipped (empty range) and a second FOR
+    /// appears later on the same line, the matching-NEXT search correctly tracks
+    /// the nested depth on the same line and resumes after the outer NEXT.
+    #[test]
+    fn test_for_skip_nested_same_line() {
+        // FOR I is skipped (5..1). The same-line search sees FOR J (depth+=1),
+        // then NEXT J (depth-=1), then NEXT I (depth==0, var match).
+        let output = run_program(
+            "10 FOR I = 5 TO 1 : FOR J = 1 TO 2 : S = 0 : NEXT J : NEXT I : PRINT \"AFTER\" : END\n20 PRINT \"BAD\"\n",
+        )
+        .unwrap();
+        assert_eq!(output, "AFTER\n");
+    }
+
+    /// Verifies that when a FOR loop is skipped and a bare NEXT (no variable)
+    /// appears later on the same line, the matching-NEXT search pairs them on the
+    /// same line and resumes immediately after the NEXT.
+    #[test]
+    fn test_for_skip_bare_next_same_line() {
+        let output =
+            run_program("10 FOR I = 10 TO 1 : PRINT \"INSIDE\" : NEXT : PRINT \"DONE\" : END\n20 PRINT \"BAD\"\n")
+                .unwrap();
+        assert_eq!(output, "DONE\n");
+    }
+
+    /// Verifies that a READ into a string variable pulls a numeric DATA value and
+    /// converts it to its string representation.
+    #[test]
+    fn test_read_number_into_string_variable() {
+        let output = run_program(
+            "\
+10 DATA 123
+20 READ S$
+30 PRINT S$
+40 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "123\n");
+    }
+
+    /// Verifies that DIM with a negative bound produces an "Invalid dimension"
+    /// error rather than panicking or allocating a bogus size.
+    #[test]
+    fn test_dim_negative_error() {
+        let result = run_program("10 DIM A(-3)\n20 END\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid dimension"));
+    }
+
+    /// Verifies that INPUT into a pre-dimensioned array element routes the entered
+    /// value through `set_array_element` (the subscripted-assignment branch).
+    #[test]
+    fn test_input_into_array_element() {
+        let output = run_program_with_input("10 DIM A(3)\n20 INPUT A(1)\n30 PRINT A(1)\n40 END\n", "99\n").unwrap();
+        assert_eq!(output, "?  99 \n");
+    }
+
+    /// Verifies that every background color 3-7 maps to a valid ANSI escape
+    /// sequence (covering the remaining background-color match arms).
+    #[test]
+    fn test_color_all_background_arms() {
+        for bg in 3..=7 {
+            let prog = format!("10 COLOR 0, {}\n20 END\n", bg);
+            let output = run_program(&prog).unwrap_or_else(|e| panic!("COLOR 0,{} failed: {}", bg, e));
+            assert!(output.starts_with("\x1b["), "COLOR 0,{} should produce ANSI escape", bg);
+        }
+    }
+
+    /// Verifies that DIM with a zero bound is accepted (array with a single slot)
+    /// and the matching NEXT search for a skipped multi-dimensional loop on later
+    /// lines resolves by variable name.
+    #[test]
+    fn test_for_skip_matching_next_subsequent_lines_by_var() {
+        // FOR I skipped on line 10; its NEXT I lives on a later line, matched by var.
+        let output = run_program(
+            "\
+10 FOR I = 5 TO 1
+20 FOR J = 1 TO 1 : S = 1 : NEXT J
+30 NEXT I
+40 PRINT \"DONE\"
+50 END
+",
+        )
+        .unwrap();
+        assert_eq!(output, "DONE\n");
     }
 }

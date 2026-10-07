@@ -2813,4 +2813,31 @@ mod tests {
         let exprs = vec![Expr::Number(-1.0)];
         assert!(eval.eval_subscripts(&exprs).is_err());
     }
+
+    /// Verifies that array access with a negative subscript on an already-known
+    /// array returns a "Subscript out of range" error (the known-array branch of
+    /// the function-call evaluation path).
+    #[test]
+    fn test_array_negative_subscript_known_array() {
+        let mut eval = Evaluator::new();
+        eval.set_array_element("A", &[1], Value::Number(5.0)).unwrap();
+        let tokens = Lexer::new("A(-1)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let err = eval.eval_expr(&expr).unwrap_err();
+        assert!(err.contains("Subscript out of range"), "got: {}", err);
+    }
+
+    /// Verifies that array access with a negative subscript on a name that is not
+    /// yet a known array or function (the auto-dimension branch) also returns a
+    /// "Subscript out of range" error rather than allocating a bogus size.
+    #[test]
+    fn test_array_negative_subscript_unknown_name() {
+        let mut eval = Evaluator::new();
+        let tokens = Lexer::new("B(-1)").tokenize();
+        let mut parser = ExprParser::new(&tokens);
+        let expr = parser.parse_expression().unwrap();
+        let err = eval.eval_expr(&expr).unwrap_err();
+        assert!(err.contains("Subscript out of range"), "got: {}", err);
+    }
 }

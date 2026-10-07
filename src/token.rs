@@ -40,6 +40,8 @@ pub enum Token {
     Locate,
     Cls,
     Color,
+    Stop,
+    Cont,
     // Logical operators
     And,
     Or,
@@ -109,7 +111,8 @@ impl Lexer {
         }
     }
 
-    /// Reads a numeric literal (integer or floating-point) starting at the current position.
+    /// Reads a numeric literal (integer, floating-point, or scientific notation) starting
+    /// at the current position. Handles forms like `42`, `3.14`, `1E-03`, `8.84361E-04`.
     fn read_number(&mut self) -> Token {
         let mut s = String::new();
         while let Some(ch) = self.peek() {
@@ -130,6 +133,51 @@ impl Lexer {
                 } else {
                     break;
                 }
+            }
+        }
+        // Scientific notation: E or e followed by optional +/- and digits
+        if let Some(ch) = self.peek() {
+            if ch == 'e' || ch == 'E' {
+                // Look ahead past E to check for optional sign then digit
+                let lookahead = self.pos + 1;
+                let next_after_e = self.input.get(lookahead);
+                let is_exponent = match next_after_e {
+                    Some('+') | Some('-') => self.input.get(lookahead + 1).map_or(false, |c| c.is_ascii_digit()),
+                    Some(c) => c.is_ascii_digit(),
+                    None => false,
+                };
+                if is_exponent {
+                    s.push('E');
+                    self.advance(); // consume E
+                    if self.peek() == Some('+') || self.peek() == Some('-') {
+                        s.push(self.peek().unwrap());
+                        self.advance();
+                    }
+                    while let Some(ch) = self.peek() {
+                        if ch.is_ascii_digit() {
+                            s.push(ch);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Token::Number(s.parse::<f64>().unwrap())
+    }
+
+    /// Reads a leading-dot numeric literal like `.5` or `.123`, producing `0.5` / `0.123`.
+    /// Assumes the current position is at the `.` and the next character is a digit.
+    fn read_leading_dot_number(&mut self) -> Token {
+        self.advance(); // consume the dot
+        let mut s = String::from("0.");
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_digit() {
+                s.push(ch);
+                self.advance();
+            } else {
+                break;
             }
         }
         Token::Number(s.parse::<f64>().unwrap())
@@ -197,12 +245,15 @@ impl Lexer {
             "LOCATE" => Token::Locate,
             "CLS" => Token::Cls,
             "COLOR" => Token::Color,
+            "STOP" => Token::Stop,
+            "CONT" => Token::Cont,
             "AND" => Token::And,
             "OR" => Token::Or,
             "XOR" => Token::Xor,
             "NOT" => Token::Not,
-            "REM" => {
-                // Consume rest of line as remark
+            upper if upper.starts_with("REM") => {
+                // Consume rest of line as remark. Classic CC-BASIC treats any word
+                // starting with "REM" (e.g. REMEMBER, REMARKABLE) as a comment.
                 let mut comment = String::new();
                 while let Some(ch) = self.peek() {
                     if ch == '\n' {
@@ -309,6 +360,15 @@ impl Lexer {
                 Some(':') => {
                     self.advance();
                     tokens.push(Token::Colon);
+                }
+                Some('.') => {
+                    // Leading-dot numeral like .5 → 0.5; otherwise skip with warning
+                    if self.input.get(self.pos + 1).map_or(false, |c| c.is_ascii_digit()) {
+                        tokens.push(self.read_leading_dot_number());
+                    } else {
+                        self.advance();
+                        eprintln!("Warning: skipping unknown character '.'");
+                    }
                 }
                 Some(ch) if ch.is_ascii_digit() => {
                     tokens.push(self.read_number());
@@ -452,6 +512,33 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_remark_prefix_remember() {
+        let tokens = Lexer::new("REMEMBER THE TERMINATION CONDITION, AND DO NOT BECOME TOO ANXIOUS").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Rem("THE TERMINATION CONDITION, AND DO NOT BECOME TOO ANXIOUS".to_string()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_remark_prefix_remarkable() {
+        let tokens = Lexer::new("REMARKABLE PROGRAM BY DAVID AHL").tokenize();
+        assert_eq!(
+            tokens,
+            vec![Token::Rem("PROGRAM BY DAVID AHL".to_string()), Token::Eof]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_remark_lowercase_prefix() {
+        let tokens = Lexer::new("remember this").tokenize();
+        assert_eq!(tokens, vec![Token::Rem("this".to_string()), Token::Eof]);
+    }
+
+    #[test]
     fn test_tokenize_basic_line() {
         let tokens = Lexer::new("10 PRINT \"HELLO\"\n").tokenize();
         assert_eq!(
@@ -559,6 +646,112 @@ mod tests {
     fn test_tokenize_number_with_trailing_dot() {
         let tokens = Lexer::new("42.").tokenize();
         assert_eq!(tokens, vec![Token::Number(42.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_number() {
+        let tokens = Lexer::new(".5").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.5), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_number_multi_digit() {
+        let tokens = Lexer::new(".123").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.123), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_leading_dot_in_expression() {
+        let tokens = Lexer::new("A = .75 * 2").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Equal,
+                Token::Number(0.75),
+                Token::Star,
+                Token::Number(2.0),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_bare_dot_still_warns() {
+        // A dot not followed by a digit should still be skipped with a warning
+        let tokens = Lexer::new("A . B").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Identifier("B".to_string()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_negative_exponent() {
+        let tokens = Lexer::new("1E-03").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.001), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_positive_exponent() {
+        let tokens = Lexer::new("1E+03").tokenize();
+        assert_eq!(tokens, vec![Token::Number(1000.0), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_float_base() {
+        let tokens = Lexer::new("8.84361E-04").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.000884361), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_lowercase_e() {
+        let tokens = Lexer::new("1.5e-2").tokenize();
+        assert_eq!(tokens, vec![Token::Number(0.015), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_scientific_notation_in_expression() {
+        let tokens = Lexer::new("G=1E-03:Z=1.8").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("G".to_string()),
+                Token::Equal,
+                Token::Number(0.001),
+                Token::Colon,
+                Token::Identifier("Z".to_string()),
+                Token::Equal,
+                Token::Number(1.8),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_identifier_with_e_not_exponent() {
+        // E followed by a letter (not sign+digit) is NOT an exponent
+        let tokens = Lexer::new("E").tokenize();
+        assert_eq!(tokens, vec![Token::Identifier("E".to_string()), Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_number_followed_by_identifier_e() {
+        // A space between number and E means it's a separate identifier
+        let tokens = Lexer::new("A 2E").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Number(2.0),
+                Token::Identifier("E".to_string()),
+                Token::Eof
+            ]
+        );
     }
 
     #[test]
@@ -784,6 +977,56 @@ mod tests {
                 Token::Number(0.0),
                 Token::Comma,
                 Token::Number(0.0),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_stop_keyword() {
+        let tokens = Lexer::new("STOP").tokenize();
+        assert_eq!(tokens, vec![Token::Stop, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_cont_keyword() {
+        let tokens = Lexer::new("CONT").tokenize();
+        assert_eq!(tokens, vec![Token::Cont, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_stop_cont_case_insensitive() {
+        let tokens = Lexer::new("stop cont").tokenize();
+        assert_eq!(tokens, vec![Token::Stop, Token::Cont, Token::Eof]);
+    }
+
+    #[test]
+    fn test_tokenize_stop_statement() {
+        let tokens = Lexer::new("10 STOP\n20 END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Stop,
+                Token::Newline,
+                Token::Number(20.0),
+                Token::End,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_cont_statement() {
+        let tokens = Lexer::new("10 CONT\n20 END").tokenize();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(10.0),
+                Token::Cont,
+                Token::Newline,
+                Token::Number(20.0),
+                Token::End,
                 Token::Eof,
             ]
         );

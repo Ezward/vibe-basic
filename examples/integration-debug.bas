@@ -1,0 +1,9 @@
+10 REM Debug integration test program.
+20 LET X = 40
+30 GOSUB 100
+40 STOP
+50 INPUT "N>"; N
+60 PRINT X + N
+70 END
+100 LET Y = 100
+110 RETURN

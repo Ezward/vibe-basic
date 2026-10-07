@@ -29,10 +29,13 @@ pub enum Statement {
     Goto {
         line_number: u32,
     },
+    /// INPUT ["prompt" (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}.
+    ///
+    /// One or more comma-separated variables; at runtime the user enters the
+    /// matching values, also separated by commas, in the same order.
     Input {
         prompt: Option<String>,
-        variable: String,
-        indices: Vec<Expr>,
+        variables: Vec<(String, Vec<Expr>)>,
         suppress_question_mark: bool,
     },
     For {
@@ -42,7 +45,7 @@ pub enum Statement {
         step: Option<Expr>,
     },
     Next {
-        variable: Option<String>,
+        variables: Vec<String>,
     },
     Data {
         values: Vec<Expr>,
@@ -73,6 +76,10 @@ pub enum Statement {
         selector: Expr,
         targets: Vec<u32>,
     },
+    OnGoto {
+        selector: Expr,
+        targets: Vec<u32>,
+    },
     Return {
         target: Option<Expr>,
     },
@@ -94,6 +101,10 @@ pub enum Statement {
         background: Option<Expr>,
         border: Option<Expr>,
     },
+    /// STOP — suspend execution and return control to the debugger prompt
+    Stop,
+    /// CONT — resume execution from where the program was halted
+    Cont,
 }
 
 /// Represents an item within a PRINT statement's output list.
@@ -242,6 +253,10 @@ impl<'a> Parser<'a> {
         statements.push(self.parse_statement()?);
         while *self.peek() == Token::Colon {
             self.advance();
+            // Trailing colon at end of line (e.g. `10 PRINT "HI":`) — stop parsing statements
+            if *self.peek() == Token::Newline || *self.peek() == Token::Eof {
+                break;
+            }
             statements.push(self.parse_statement()?);
         }
         // Consume newline or EOF
@@ -287,12 +302,21 @@ impl<'a> Parser<'a> {
             }
             Token::Next => {
                 self.advance();
-                let variable = if let Token::Identifier(_) = self.peek() {
-                    Some(self.expect_identifier()?)
-                } else {
-                    None
-                };
-                Ok(Statement::Next { variable })
+                let mut variables = Vec::new();
+                if let Token::Identifier(_) = self.peek() {
+                    variables.push(self.expect_identifier()?);
+                }
+                while *self.peek() == Token::Comma {
+                    self.advance();
+                    if let Token::Identifier(_) = self.peek() {
+                        variables.push(self.expect_identifier()?);
+                    } else {
+                        return Err(self.error_with_context(
+                            "Expected variable name after comma in NEXT".to_string(),
+                        ));
+                    }
+                }
+                Ok(Statement::Next { variables })
             }
             Token::Rem(text) => {
                 self.advance();
@@ -328,7 +352,7 @@ impl<'a> Parser<'a> {
             }
             Token::On => {
                 self.advance();
-                self.parse_on_gosub()
+                self.parse_on_target()
             }
             Token::Gosub => {
                 self.advance();
@@ -355,6 +379,14 @@ impl<'a> Parser<'a> {
             Token::Color => {
                 self.advance();
                 self.parse_color()
+            }
+            Token::Stop => {
+                self.advance();
+                Ok(Statement::Stop)
+            }
+            Token::Cont => {
+                self.advance();
+                Ok(Statement::Cont)
             }
             Token::Identifier(_) => {
                 // Implicit LET: variable = expression
@@ -457,15 +489,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses an INPUT statement: `INPUT ["prompt" (";" | ",")] variable[(subscripts)]`.
+    /// Parses an INPUT statement:
+    /// `INPUT ["prompt" (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}`.
     ///
-    /// When a semicolon separates the prompt from the variable, a "? " is appended
-    /// to the prompt at runtime (GW-BASIC default). When a comma is used instead,
-    /// the question mark is suppressed.
+    /// One or more comma-separated variables may follow the (optional) prompt.
+    /// When a semicolon separates the prompt from the first variable, a "? " is
+    /// appended to the prompt at runtime (GW-BASIC default). When a comma is used
+    /// instead, the question mark is suppressed.
     fn parse_input(&mut self) -> Result<Statement, String> {
-        // INPUT [string (";" | ",")] variable[(subscripts)]
+        // INPUT [string (";" | ",")] variable[(subscripts)] {, variable[(subscripts)]}
         let prompt;
-        let variable;
         let suppress_question_mark;
 
         match self.peek().clone() {
@@ -475,12 +508,10 @@ impl<'a> Parser<'a> {
                     self.advance();
                     prompt = Some(s);
                     suppress_question_mark = false;
-                    variable = self.expect_identifier()?;
                 } else if *self.peek() == Token::Comma {
                     self.advance();
                     prompt = Some(s);
                     suppress_question_mark = true;
-                    variable = self.expect_identifier()?;
                 } else {
                     return Err(self.error_with_context("Expected ';' or ',' after INPUT prompt string".to_string()));
                 }
@@ -488,7 +519,6 @@ impl<'a> Parser<'a> {
             Token::Identifier(_) => {
                 prompt = None;
                 suppress_question_mark = false;
-                variable = self.expect_identifier()?;
             }
             ref tok => {
                 let msg = format!("Expected variable or string in INPUT, got {:?}", tok);
@@ -496,11 +526,22 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let indices = self.parse_optional_subscripts()?;
+        // Parse the comma-separated variable list, each with optional subscripts.
+        let mut variables = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            let indices = self.parse_optional_subscripts()?;
+            variables.push((name, indices));
+            if *self.peek() == Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
         Ok(Statement::Input {
             prompt,
-            variable,
-            indices,
+            variables,
             suppress_question_mark,
         })
     }
@@ -712,21 +753,24 @@ impl<'a> Parser<'a> {
         Ok(Statement::Restore { line_number })
     }
 
-    /// Parses an `ON expr GOSUB line1, line2, ...` statement.
-    /// The selector expression is evaluated at runtime to choose which target line to GOSUB to.
-    /// Targets are 1-indexed: ON 1 GOSUB 100,200 calls line 100, ON 2 calls line 200.
-    fn parse_on_gosub(&mut self) -> Result<Statement, String> {
+    /// Parses an `ON expr GOSUB line1, line2, ...` or `ON expr GOTO line1, line2, ...` statement.
+    /// The selector expression is evaluated at runtime to choose which target line to jump to.
+    /// Targets are 1-indexed: ON 1 GOTO 100,200 jumps to line 100, ON 2 jumps to line 200.
+    fn parse_on_target(&mut self) -> Result<Statement, String> {
         let selector = self.parse_expression()?;
-        if *self.peek() != Token::Gosub {
-            return Err(self.error_with_context("Expected GOSUB after ON expression".to_string()));
+        let is_gosub = *self.peek() == Token::Gosub;
+        let is_goto = *self.peek() == Token::Goto;
+        if !is_gosub && !is_goto {
+            return Err(self.error_with_context("Expected GOTO or GOSUB after ON expression".to_string()));
         }
-        self.advance(); // consume GOSUB
+        self.advance(); // consume GOTO or GOSUB
+        let target_desc = if is_gosub { "ON...GOSUB" } else { "ON...GOTO" };
         let mut targets = Vec::new();
         if let Token::Number(n) = self.peek().clone() {
             self.advance();
             targets.push(n as u32);
         } else {
-            return Err(self.error_with_context("Expected line number after ON...GOSUB".to_string()));
+            return Err(self.error_with_context(format!("Expected line number after {}", target_desc)));
         }
         while *self.peek() == Token::Comma {
             self.advance();
@@ -734,10 +778,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 targets.push(n as u32);
             } else {
-                return Err(self.error_with_context("Expected line number after comma in ON...GOSUB".to_string()));
+                return Err(self.error_with_context(format!("Expected line number after comma in {}", target_desc)));
             }
         }
-        Ok(Statement::OnGosub { selector, targets })
+        if is_gosub {
+            Ok(Statement::OnGosub { selector, targets })
+        } else {
+            Ok(Statement::OnGoto { selector, targets })
+        }
     }
 
     /// Parses a LOCATE statement: `LOCATE [row][,[col][,[cursor][,[start][,stop]]]]`.
@@ -1012,8 +1060,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: None,
-                variable: "N$".to_string(),
-                indices: vec![],
+                variables: vec![("N$".to_string(), vec![])],
                 suppress_question_mark: false,
             }
         );
@@ -1026,8 +1073,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("GUESS (1-10): ".to_string()),
-                variable: "G".to_string(),
-                indices: vec![],
+                variables: vec![("G".to_string(), vec![])],
                 suppress_question_mark: false,
             }
         );
@@ -1040,8 +1086,7 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("ENTER VALUE: ".to_string()),
-                variable: "G".to_string(),
-                indices: vec![],
+                variables: vec![("G".to_string(), vec![])],
                 suppress_question_mark: true,
             }
         );
@@ -1054,8 +1099,54 @@ mod tests {
             stmt,
             Statement::Input {
                 prompt: Some("NAME".to_string()),
-                variable: "N$".to_string(),
-                indices: vec![],
+                variables: vec![("N$".to_string(), vec![])],
+                suppress_question_mark: true,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_variables() {
+        let stmt = parse_single_statement("10 INPUT \"AGE: \"; A, W, H");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("AGE: ".to_string()),
+                variables: vec![
+                    ("A".to_string(), vec![]),
+                    ("W".to_string(), vec![]),
+                    ("H".to_string(), vec![]),
+                ],
+                suppress_question_mark: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_mixed_and_subscripted() {
+        let stmt = parse_single_statement("10 INPUT N$, A, B(2)");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: None,
+                variables: vec![
+                    ("N$".to_string(), vec![]),
+                    ("A".to_string(), vec![]),
+                    ("B".to_string(), vec![Expr::Number(2.0)]),
+                ],
+                suppress_question_mark: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_multiple_comma_suppresses_question() {
+        let stmt = parse_single_statement("10 INPUT \"A, B\", X, Y");
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                prompt: Some("A, B".to_string()),
+                variables: vec![("X".to_string(), vec![]), ("Y".to_string(), vec![]),],
                 suppress_question_mark: true,
             }
         );
@@ -1092,18 +1183,35 @@ mod tests {
     #[test]
     fn test_parse_next() {
         let stmt = parse_single_statement("40 NEXT I");
-        assert_eq!(
-            stmt,
-            Statement::Next {
-                variable: Some("I".to_string()),
-            }
-        );
+        assert_eq!(stmt, Statement::Next { variables: vec!["I".to_string()] });
     }
 
     #[test]
     fn test_parse_next_no_var() {
         let stmt = parse_single_statement("40 NEXT");
-        assert_eq!(stmt, Statement::Next { variable: None });
+        assert_eq!(stmt, Statement::Next { variables: vec![] });
+    }
+
+    #[test]
+    fn test_parse_next_multiple_vars() {
+        let stmt = parse_single_statement("40 NEXT Y, X");
+        assert_eq!(
+            stmt,
+            Statement::Next {
+                variables: vec!["Y".to_string(), "X".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_next_three_vars() {
+        let stmt = parse_single_statement("40 NEXT A, B, C");
+        assert_eq!(
+            stmt,
+            Statement::Next {
+                variables: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            }
+        );
     }
 
     #[test]
@@ -1133,6 +1241,29 @@ mod tests {
             }
         );
         assert_eq!(prog.lines[0].statements[1], Statement::Goto { line_number: 70 });
+    }
+
+    #[test]
+    fn test_parse_trailing_colon_at_end_of_line() {
+        let prog = parse_program("10 PRINT \"HI\":\n");
+        assert_eq!(prog.lines.len(), 1);
+        assert_eq!(prog.lines[0].statements.len(), 1);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Print { .. }));
+    }
+
+    #[test]
+    fn test_parse_trailing_colon_mid_program() {
+        let prog = parse_program("10 PRINT \"HI\":\n20 END\n");
+        assert_eq!(prog.lines.len(), 2);
+        assert_eq!(prog.lines[0].statements.len(), 1);
+        assert_eq!(prog.lines[1].statements.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_multi_statement_with_trailing_colon() {
+        let prog = parse_program("10 X = 1 : PRINT X:\n");
+        assert_eq!(prog.lines.len(), 1);
+        assert_eq!(prog.lines[0].statements.len(), 2);
     }
 
     #[test]
@@ -1812,7 +1943,7 @@ mod tests {
         let mut parser = Parser::new(&tokens, source_lines);
         let result = parser.parse_program();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Expected GOSUB"));
+        assert!(result.unwrap_err().contains("Expected GOTO or GOSUB"));
     }
 
     #[test]
@@ -1839,6 +1970,51 @@ mod tests {
         );
         assert_eq!(prog.lines.len(), 6);
         assert!(matches!(prog.lines[0].statements[0], Statement::OnGosub { .. }));
+    }
+
+    #[test]
+    fn test_parse_on_goto_basic() {
+        let stmt = parse_single_statement("10 ON X GOTO 100, 200, 300");
+        match stmt {
+            Statement::OnGoto { selector, targets } => {
+                assert!(matches!(selector, Expr::Variable(_)));
+                assert_eq!(targets, vec![100, 200, 300]);
+            }
+            _ => panic!("Expected OnGoto, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_single_target() {
+        let stmt = parse_single_statement("10 ON I GOTO 500");
+        match stmt {
+            Statement::OnGoto { targets, .. } => {
+                assert_eq!(targets, vec![500]);
+            }
+            _ => panic!("Expected OnGoto"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_expression_selector() {
+        let stmt = parse_single_statement("10 ON A + 1 GOTO 100, 200");
+        match stmt {
+            Statement::OnGoto { selector, targets } => {
+                assert!(matches!(selector, Expr::BinaryOp { .. }));
+                assert_eq!(targets, vec![100, 200]);
+            }
+            _ => panic!("Expected OnGoto"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_error_missing_keyword() {
+        let tokens = Lexer::new("10 ON X 100, 200").tokenize();
+        let source_lines = vec!["10 ON X 100, 200".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected GOTO or GOSUB"));
     }
 
     #[test]
@@ -2018,5 +2194,115 @@ mod tests {
                 border: None,
             }
         );
+    }
+
+    #[test]
+    fn test_parse_stop() {
+        let stmt = parse_single_statement("10 STOP");
+        assert_eq!(stmt, Statement::Stop);
+    }
+
+    #[test]
+    fn test_parse_cont() {
+        let stmt = parse_single_statement("10 CONT");
+        assert_eq!(stmt, Statement::Cont);
+    }
+
+    #[test]
+    fn test_parse_stop_case_insensitive() {
+        let stmt = parse_single_statement("10 stop");
+        assert_eq!(stmt, Statement::Stop);
+    }
+
+    #[test]
+    fn test_parse_cont_case_insensitive() {
+        let stmt = parse_single_statement("10 cont");
+        assert_eq!(stmt, Statement::Cont);
+    }
+
+    #[test]
+    fn test_parse_stop_on_multi_statement_line() {
+        let prog = parse_program("10 PRINT \"HI\" : STOP");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[1], Statement::Stop));
+    }
+
+    #[test]
+    fn test_parse_cont_on_multi_statement_line() {
+        let prog = parse_program("10 CONT : PRINT \"HI\"");
+        assert_eq!(prog.lines[0].statements.len(), 2);
+        assert!(matches!(prog.lines[0].statements[0], Statement::Cont));
+    }
+
+    /// Verifies that a LET with array subscripts that is missing the closing `)`
+    /// produces the "Expected ')' after array subscripts" error.
+    #[test]
+    fn test_parse_let_array_missing_rparen() {
+        let err = parse_program_err("10 LET A(1 = 5");
+        assert!(err.contains("Expected ')' after array subscripts"));
+    }
+
+    /// Verifies that a READ targeting a multi-dimensional array element
+    /// (comma-separated subscripts) parses all indices correctly.
+    #[test]
+    fn test_parse_read_array_multi_index() {
+        let stmt = parse_single_statement("10 READ A(1, 2), B(3, 4)");
+        assert_eq!(
+            stmt,
+            Statement::Read {
+                variables: vec![
+                    ("A".to_string(), vec![Expr::Number(1.0), Expr::Number(2.0)]),
+                    ("B".to_string(), vec![Expr::Number(3.0), Expr::Number(4.0)]),
+                ],
+            }
+        );
+    }
+
+    /// Verifies that a READ with a multi-dimensional subscript list missing the
+    /// closing `)` produces the "Expected ')' after subscripts" error.
+    #[test]
+    fn test_parse_read_array_missing_rparen() {
+        let err = parse_program_err("10 READ A(1, 2");
+        assert!(err.contains("Expected ')' after subscripts"));
+    }
+
+    /// Verifies that an ON...GOSUB whose selector is followed by a comma and then
+    /// a non-number target produces the "Expected line number after comma" error.
+    #[test]
+    fn test_parse_on_gosub_error_non_numeric_target() {
+        let tokens = Lexer::new("10 ON X GOSUB 100, Y").tokenize();
+        let source_lines = vec!["10 ON X GOSUB 100, Y".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Expected line number after comma in ON...GOSUB"));
+    }
+
+    /// Verifies that LOCATE stops parsing its parameter list when a non-comma
+    /// token follows the first parameter; the trailing token then surfaces as an
+    /// "Unexpected token" error from the statement loop.
+    #[test]
+    fn test_parse_locate_trailing_non_comma() {
+        let tokens = Lexer::new("10 LOCATE 10 20").tokenize();
+        let source_lines = vec!["10 LOCATE 10 20".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected token"));
+    }
+
+    /// Verifies that COLOR stops parsing its parameter list when a non-comma
+    /// token follows the first parameter; the trailing token then surfaces as an
+    /// "Unexpected token" error from the statement loop.
+    #[test]
+    fn test_parse_color_trailing_non_comma() {
+        let tokens = Lexer::new("10 COLOR 7 2").tokenize();
+        let source_lines = vec!["10 COLOR 7 2".to_string()];
+        let mut parser = Parser::new(&tokens, source_lines);
+        let result = parser.parse_program();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected token"));
     }
 }
